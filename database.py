@@ -66,10 +66,17 @@ def mysql_settings(include_database: bool = True) -> dict:
         settings = {
             "host": _first_env("MYSQL_HOST", "DB_HOST", "MYSQLHOST", default="127.0.0.1"),
             "port": int(_first_env("MYSQL_PORT", "DB_PORT", "MYSQLPORT", default="3306")),
-            "user": _first_env("MYSQL_USER", "DB_USER", "MYSQLUSER", default="root"),
+            "user": _first_env(
+                "MYSQL_USER",
+                "DB_USERNAME",
+                "DB_USER",
+                "MYSQLUSER",
+                default="root",
+            ),
             "password": _first_env("MYSQL_PASSWORD", "DB_PASSWORD", "MYSQLPASSWORD", default=""),
             "database": _first_env(
                 "MYSQL_DATABASE",
+                "DB_DATABASE",
                 "DB_NAME",
                 "MYSQLDATABASE",
                 default="jc_aqua_fish_shop",
@@ -98,7 +105,10 @@ def mysql_settings(include_database: bool = True) -> dict:
 
 
 def get_connection():
-    return mysql.connector.connect(**mysql_settings())
+    settings = mysql_settings()
+    # Pure-Python mode is more reliable on Vercel serverless than the C extension.
+    settings["use_pure"] = True
+    return mysql.connector.connect(**settings)
 
 
 def database_ping() -> bool:

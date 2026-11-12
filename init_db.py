@@ -643,28 +643,34 @@ def migrate_existing_schema(cursor) -> None:
 
 
 def initialize_database() -> None:
-    settings = mysql_settings(include_database=False)
     database_name = mysql_settings()["database"]
     if not re.fullmatch(r"[A-Za-z0-9_]+", database_name):
         raise ValueError("MYSQL_DATABASE may contain only letters, numbers, and underscores.")
 
-    connection = mysql.connector.connect(**settings)
+    # Local XAMPP can create the schema; cloud hosts like FreeDB usually
+    # already provide a fixed database and reject CREATE DATABASE.
     try:
-        cursor = connection.cursor()
-        cursor.execute(
-            f"CREATE DATABASE IF NOT EXISTS `{database_name}` "
-            "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
-        )
-    finally:
-        connection.close()
+        settings = mysql_settings(include_database=False)
+        connection = mysql.connector.connect(**settings)
+        try:
+            cursor = connection.cursor()
+            cursor.execute(
+                f"CREATE DATABASE IF NOT EXISTS `{database_name}` "
+                "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+            )
+        finally:
+            connection.close()
+    except mysql.connector.Error:
+        pass
 
-    settings["database"] = database_name
+    settings = mysql_settings(include_database=True)
     connection = mysql.connector.connect(**settings)
     try:
         cursor = connection.cursor()
         for statement in SCHEMA:
             cursor.execute(statement)
         migrate_existing_schema(cursor)
+        connection.commit()
     finally:
         connection.close()
 

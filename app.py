@@ -84,8 +84,15 @@ if _cookie_secure is None and (
     os.environ.get("VERCEL") == "1" or os.environ.get("RENDER") == "true"
 ):
     _cookie_secure = "1"
+_flask_secret = (os.environ.get("FLASK_SECRET_KEY") or "").strip()
+# On Vercel, missing env must not crash the whole serverless import (FUNCTION_INVOCATION_FAILED).
+# Use a throwaway key so routes can still render a clear setup error.
+_missing_flask_secret = not bool(_flask_secret)
+if _missing_flask_secret:
+    _flask_secret = secrets.token_hex(32)
+
 app.config.update(
-    SECRET_KEY=os.environ.get("FLASK_SECRET_KEY"),
+    SECRET_KEY=_flask_secret,
     # Local HTTP: leave COOKIE_SECURE unset/0. HTTPS production: set COOKIE_SECURE=1.
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
@@ -93,10 +100,25 @@ app.config.update(
     WTF_CSRF_TIME_LIMIT=3600,
     MAX_CONTENT_LENGTH=5 * 1024 * 1024,
 )
-if not app.config["SECRET_KEY"]:
-    raise RuntimeError(
-        "Set FLASK_SECRET_KEY before starting the app. "
-        "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
+
+
+@app.before_request
+def _require_flask_secret_configured():
+    if not _missing_flask_secret:
+        return None
+    path = request.path or ""
+    if path.startswith("/static/") or path in {"/health", "/health/db"}:
+        return None
+    return (
+        render_template(
+            "error.html",
+            title="Missing FLASK_SECRET_KEY",
+            message=(
+                "Set FLASK_SECRET_KEY in Vercel → Project Settings → Environment Variables, "
+                "then Redeploy. You can import .env.vercel from this project."
+            ),
+        ),
+        500,
     )
 
 csrf = CSRFProtect(app)
@@ -2270,6 +2292,21 @@ def delete_order(order_id: int):
     return redirect(url_for("order_list"))
 
 
+@app.get("/health")
+def health():
+    """Lightweight boot check that does not require MySQL."""
+    return jsonify(
+        {
+            "ok": True,
+            "flask_secret_configured": not _missing_flask_secret,
+            "vercel": os.environ.get("VERCEL") == "1",
+            "mysql_host": os.environ.get("MYSQL_HOST")
+            or os.environ.get("DB_HOST")
+            or "(missing)",
+        }
+    )
+
+
 @app.get("/health/db")
 def health_db():
     """Quick connectivity check for Vercel/Render diagnostics."""
@@ -2283,6 +2320,7 @@ def health_db():
             "database": settings.get("database"),
             "user": settings.get("user"),
             "ssl_disabled": settings.get("ssl_disabled"),
+            "flask_secret_configured": not _missing_flask_secret,
         }
     ), (200 if ok else 503)
 

@@ -1,6 +1,6 @@
-Flask
-mysql-connector-python
-Werkzeug
-Flask-WTF
-firebase-admin
-python-dotenv
+Flask>=3.0,<4
+mysql-connector-python>=8.0,<10
+Werkzeug>=3.0,<4
+Flask-WTF>=1.2,<2
+python-dotenv>=1.0,<2
+# firebase-admin is optional (lazy-imported). Omit on Vercel to avoid large function size.
