@@ -6,8 +6,7 @@ import os
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-os.environ.setdefault("MYSQL_CONNECTOR_PYTHON_IMPL", "pure")
-
+# Prefer the local pure-Python mysql.connector shim (see mysql/connector.py).
 import mysql.connector
 
 
@@ -108,8 +107,8 @@ def mysql_settings(include_database: bool = True) -> dict:
 
 def get_connection():
     settings = mysql_settings()
-    # Pure-Python mode is more reliable on Vercel serverless than the C extension.
-    settings["use_pure"] = True
+    # Drop connector-only flags the PyMySQL shim ignores safely if present.
+    settings.pop("use_pure", None)
     return mysql.connector.connect(**settings)
 
 

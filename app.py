@@ -10,13 +10,14 @@ from __future__ import annotations
 import os
 import traceback
 
-# Prefer pure-Python MySQL connector on Vercel serverless.
-os.environ.setdefault("MYSQL_CONNECTOR_PYTHON_IMPL", "pure")
+# Force pure-Python DB path before any driver import.
+os.environ["MYSQL_CONNECTOR_PYTHON_IMPL"] = "pure"
 
 _BOOT_TRACEBACK: str | None = None
 
 try:
     from application import *  # noqa: F401,F403
+    from application import app as app
 except Exception:  # noqa: BLE001 - never crash the serverless import
     from flask import Flask
 
