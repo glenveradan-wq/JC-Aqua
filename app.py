@@ -2363,6 +2363,24 @@ def handle_csrf_error(error):
     )
 
 
+@app.errorhandler(Exception)
+def handle_unexpected_error(error):
+    """Keep the serverless worker alive; return HTML instead of crashing the process."""
+    from werkzeug.exceptions import HTTPException
+
+    if isinstance(error, HTTPException):
+        return error
+    app.logger.exception("Unhandled error: %s", error)
+    return (
+        render_template(
+            "error.html",
+            title="Something went wrong",
+            message="Please refresh the page. If this keeps happening, open /health/db to check the database.",
+        ),
+        500,
+    )
+
+
 from inventory_bp import inventory_bp
 
 app.register_blueprint(inventory_bp)
