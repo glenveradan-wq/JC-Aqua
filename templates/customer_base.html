@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
-    <link href="{{ url_for('static', filename='css/style.css', v=9) }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css', v=11) }}" rel="stylesheet">
     {% block head %}{% endblock %}
 </head>
 <body class="site-page {% block body_class %}{% endblock %}">
@@ -31,10 +31,12 @@
                 <a class="nav-link" href="{{ url_for('customer_cart_view') }}" {% if active_page == "cart" %}aria-current="page"{% endif %}>Cart</a>
                 <a class="nav-link" href="{{ url_for('customer_orders') }}" {% if active_page == "orders" %}aria-current="page"{% endif %}>My orders</a>
                 <a class="nav-link" href="{{ url_for('customer_profile') }}" {% if active_page == "profile" %}aria-current="page"{% endif %}>Profile</a>
-                <form method="post" action="{{ url_for('customer_logout') }}">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <button class="nav-link nav-logout" type="submit">Sign out</button>
-                </form>
+                <button
+                    class="nav-link nav-logout"
+                    type="button"
+                    data-open-modal="logout-confirm-modal">
+                    Sign out
+                </button>
             </div>
         </nav>
     </header>
@@ -42,9 +44,25 @@
         {% include "_flashes.html" %}
         {% block content %}{% endblock %}
     </main>
+    <dialog class="app-modal" id="logout-confirm-modal" data-app-modal>
+        <div class="app-modal-card">
+            <p class="app-modal-kicker">Account</p>
+            <h2 class="app-modal-title">Log out?</h2>
+            <p class="app-modal-copy">Are you sure you want to log out?</p>
+            <div class="app-modal-actions">
+                <button class="button button-secondary" type="button" data-close-modal>Cancel</button>
+                <form method="post" action="{{ url_for('customer_logout') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="button" type="submit">Confirm Logout</button>
+                </form>
+            </div>
+        </div>
+    </dialog>
     <footer class="site-footer"><p>JC Aqua Fish Shop</p></footer>
     <script src="{{ url_for('static', filename='js/navigation.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='js/session_guard.js') }}" defer></script>
     <script src="{{ url_for('static', filename='js/form_validation.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='js/app_modals.js') }}" defer></script>
     {% block scripts %}{% endblock %}
 </body>
 </html>

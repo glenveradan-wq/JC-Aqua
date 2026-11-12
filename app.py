@@ -42,22 +42,24 @@ from models import (
     Rider,
     User,
 )
-from catalog_config import (
-    CATEGORY_EXAMPLES,
-    DEFAULT_PRODUCT_UNIT,
-    INVENTORY_CATEGORIES,
-    PRODUCT_UNITS,
-)
 from repositories import (
     CategoryRepository,
     CustomerAccountRepository,
+    EmailVerificationCodeRepository,
     InventoryConflictError,
     OrderRepository,
+    PendingRegistrationRepository,
     ProductRepository,
     RiderRepository,
     ShopSettingsRepository,
     StockMovementRepository,
     UserRepository,
+)
+from catalog_config import (
+    CATEGORY_EXAMPLES,
+    DEFAULT_PRODUCT_UNIT,
+    INVENTORY_CATEGORIES,
+    PRODUCT_UNITS,
 )
 
 
@@ -85,6 +87,8 @@ if not app.config["SECRET_KEY"]:
 csrf = CSRFProtect(app)
 users = UserRepository()
 customer_accounts = CustomerAccountRepository()
+pending_registrations = PendingRegistrationRepository()
+email_verification_codes = EmailVerificationCodeRepository()
 orders = OrderRepository()
 products = ProductRepository()
 categories = CategoryRepository()
@@ -94,11 +98,17 @@ shop_settings = ShopSettingsRepository()
 mail_service = MailService()
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 PHONE_PATTERN = re.compile(r"^[0-9+() .-]{7,40}$")
-PASSWORD_MIN_LENGTH = 10
+PASSWORD_MIN_LENGTH = 8
 PASSWORD_MAX_LENGTH = 128
 VERIFICATION_CODE_TTL_MINUTES = 5
-VERIFICATION_RESEND_COOLDOWN_SECONDS = 60
+VERIFICATION_RESEND_COOLDOWN_SECONDS = 60  # 1 minute before Resend is available
 VERIFICATION_MAX_ATTEMPTS = 5
+PASSWORD_UPPER_PATTERN = re.compile(r"[A-Z]")
+PASSWORD_LOWER_PATTERN = re.compile(r"[a-z]")
+PASSWORD_DIGIT_PATTERN = re.compile(r"[0-9]")
+PASSWORD_SPECIAL_PATTERN = re.compile(r"[^A-Za-z0-9]")
+CUSTOMER_VERIFY_MODE_REGISTRATION = "registration"
+CUSTOMER_VERIFY_MODE_FIRST_LOGIN = "first_login"
 PAYMENT_METHODS = {"gcash", "bank_transfer", "cod"}
 PAYMENT_METHOD_LABELS = {
     "gcash": "GCash",
@@ -126,6 +136,51 @@ def password_length_is_valid(password: str) -> bool:
     return PASSWORD_MIN_LENGTH <= len(password) <= PASSWORD_MAX_LENGTH
 
 
+def password_policy_error(password: str) -> str | None:
+    """Return a user-facing error when password fails policy, else None."""
+    if not password_length_is_valid(password):
+        return (
+            f"Your password must be between {PASSWORD_MIN_LENGTH} and "
+            f"{PASSWORD_MAX_LENGTH} characters."
+        )
+    missing = []
+    if not PASSWORD_UPPER_PATTERN.search(password):
+        missing.append("an uppercase letter")
+    if not PASSWORD_LOWER_PATTERN.search(password):
+        missing.append("a lowercase letter")
+    if not PASSWORD_DIGIT_PATTERN.search(password):
+        missing.append("a number")
+    if missing:
+        if len(missing) == 1:
+            detail = missing[0]
+        else:
+            detail = ", ".join(missing[:-1]) + f", and {missing[-1]}"
+        return f"Your password must include {detail}."
+    return None
+
+
+def password_is_valid(password: str) -> bool:
+    return password_policy_error(password) is None
+
+
+AUTH_NO_CACHE_ENDPOINTS = {
+    "home",
+    "login",
+    "register",
+    "staff_verify_email",
+    "logout",
+    "customer_login",
+    "customer_register",
+    "customer_verify_email",
+    "customer_first_login_verify",
+    "customer_logout",
+    "customer_dashboard",
+    "dashboard",
+    "profile",
+    "customer_profile",
+}
+
+
 @app.after_request
 def set_security_headers(response):
     response.headers["X-Content-Type-Options"] = "nosniff"
@@ -151,6 +206,12 @@ def set_security_headers(response):
         response.headers["Strict-Transport-Security"] = (
             "max-age=31536000; includeSubDomains"
         )
+    # Prevent browser Back from restoring cached login/session pages.
+    endpoint = request.endpoint or ""
+    if endpoint in AUTH_NO_CACHE_ENDPOINTS or endpoint.startswith("customer_"):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
     return response
 
 
@@ -514,15 +575,9 @@ def parse_profile_form(account) -> tuple[dict | None, str | None, str | None]:
     if not EMAIL_PATTERN.fullmatch(email) or len(email) > 254:
         return profile_data, None, "Enter a valid email address."
     if new_password or confirm_password:
-        if not password_length_is_valid(new_password):
-            return (
-                profile_data,
-                None,
-                (
-                    f"Your new password must be between {PASSWORD_MIN_LENGTH} and "
-                    f"{PASSWORD_MAX_LENGTH} characters."
-                ),
-            )
+        policy_error = password_policy_error(new_password)
+        if policy_error:
+            return profile_data, None, policy_error
         if new_password != confirm_password:
             return profile_data, None, "The new passwords do not match."
         return profile_data, generate_password_hash(new_password), None
@@ -577,10 +632,18 @@ def notify_verification_code(
     full_name: str,
     code: str,
     account_type: str,
+    *,
+    pending_registration: bool = False,
 ) -> bool:
     sent = mail_service.send_verification_code(email, full_name, code, account_type)
     if sent:
-        flash("We sent a 6-digit verification code to your email.", "info")
+        flash("A new verification code has been sent to your email.", "info")
+    elif pending_registration:
+        flash(
+            "We could not send the verification email. Check your connection and try Resend code. "
+            "Your account is not created until email verification succeeds.",
+            "error",
+        )
     else:
         flash(
             "Your account was created, but the verification email could not be sent. "
@@ -590,13 +653,83 @@ def notify_verification_code(
     return sent
 
 
-def begin_email_verification(email: str, account_type: str) -> None:
+def begin_email_verification(
+    email: str,
+    account_type: str,
+    mode: str = CUSTOMER_VERIFY_MODE_REGISTRATION,
+) -> None:
     session["pending_verification_email"] = email
     session["pending_verification_account"] = account_type
+    session["pending_verification_mode"] = mode
+
+
+def clear_email_verification_session() -> None:
+    session.pop("pending_verification_email", None)
+    session.pop("pending_verification_account", None)
+    session.pop("pending_verification_mode", None)
+    session.pop("pending_first_login_customer_id", None)
+
+
+def pending_resend_cooldown_remaining(last_sent_at) -> int:
+    if not last_sent_at:
+        return 0
+    if getattr(last_sent_at, "tzinfo", None) is not None:
+        last_sent_at = last_sent_at.astimezone(timezone.utc).replace(tzinfo=None)
+    elapsed = (utc_now_naive() - last_sent_at).total_seconds()
+    remaining = VERIFICATION_RESEND_COOLDOWN_SECONDS - int(elapsed)
+    return max(0, remaining)
+
+
+def issue_pending_registration_otp(
+    full_name: str,
+    email: str,
+    password_hash: str,
+) -> tuple[str, object]:
+    code = generate_verification_code()
+    now = utc_now_naive()
+    expires_at = now + timedelta(minutes=VERIFICATION_CODE_TTL_MINUTES)
+    otp_hash = generate_password_hash(code)
+    pending_registrations.upsert(
+        full_name=full_name,
+        email=email,
+        password_hash=password_hash,
+        otp_hash=otp_hash,
+        otp_expires_at=expires_at,
+        last_sent_at=now,
+    )
+    email_verification_codes.create_code(
+        email=email,
+        otp_hash=otp_hash,
+        verification_type=CUSTOMER_VERIFY_MODE_REGISTRATION,
+        expires_at=expires_at,
+        customer_id=None,
+    )
+    pending = pending_registrations.get_by_email(email)
+    return code, pending
+
+
+def issue_first_login_otp(customer: CustomerAccount) -> str:
+    code = generate_verification_code()
+    now = utc_now_naive()
+    expires_at = now + timedelta(minutes=VERIFICATION_CODE_TTL_MINUTES)
+    otp_hash = generate_password_hash(code)
+    email_verification_codes.create_code(
+        email=customer.email,
+        otp_hash=otp_hash,
+        verification_type=CUSTOMER_VERIFY_MODE_FIRST_LOGIN,
+        expires_at=expires_at,
+        customer_id=customer.id,
+    )
+    return code
+
+
+def establish_customer_session(customer: CustomerAccount) -> None:
+    session.clear()
+    session["customer_id"] = customer.id
 
 
 def handle_verification_post(account, account_type: str, email: str, action: str):
-    """Process verify/resend for customer or staff. Returns redirect response or None."""
+    """Process verify/resend for staff (and legacy customer accounts). Returns redirect or None."""
     login_endpoint = "customer_login" if account_type == "customer" else "login"
     repo = account_repository(account_type)
 
@@ -636,18 +769,192 @@ def handle_verification_post(account, account_type: str, email: str, action: str
             )
         else:
             flash(
-                f"That verification code is invalid or has expired. "
-                f"{remaining} attempt(s) remaining.",
+                "Invalid verification code. Please check your email and try again.",
                 "error",
             )
         return None
 
     repo.mark_email_verified(account.id)
-    session.pop("pending_verification_email", None)
-    session.pop("pending_verification_account", None)
+    clear_email_verification_session()
     notify_welcome(email, account.full_name, account_type)
-    flash("Your email is verified. Please sign in.", "success")
+    flash(
+        "Your email has been successfully verified! Your account has been created.",
+        "success",
+    )
     return redirect(url_for(login_endpoint))
+
+
+def handle_pending_registration_post(email: str, action: str):
+    pending = pending_registrations.get_by_email(email)
+    if pending is None:
+        flash("No pending registration was found for that email. Please register again.", "error")
+        return redirect(url_for("customer_register"))
+
+    if action == "resend":
+        wait_seconds = pending_resend_cooldown_remaining(pending.last_sent_at)
+        if wait_seconds > 0:
+            flash(
+                f"Please wait {wait_seconds} seconds before requesting another code.",
+                "error",
+            )
+            return None
+        if not mail_service.is_configured:
+            flash(
+                "Email delivery is unavailable right now. Verification cannot continue until SMTP is configured.",
+                "error",
+            )
+            return None
+        code = generate_verification_code()
+        now = utc_now_naive()
+        expires_at = now + timedelta(minutes=VERIFICATION_CODE_TTL_MINUTES)
+        otp_hash = generate_password_hash(code)
+        pending_registrations.set_otp(email, otp_hash, expires_at, now)
+        email_verification_codes.create_code(
+            email=email,
+            otp_hash=otp_hash,
+            verification_type=CUSTOMER_VERIFY_MODE_REGISTRATION,
+            expires_at=expires_at,
+            customer_id=None,
+        )
+        if notify_verification_code(
+            email,
+            pending.full_name,
+            code,
+            "customer",
+            pending_registration=True,
+        ):
+            begin_email_verification(email, "customer", CUSTOMER_VERIFY_MODE_REGISTRATION)
+        return None
+
+    if pending.attempts >= VERIFICATION_MAX_ATTEMPTS:
+        flash(
+            "Too many incorrect attempts. Use Resend code to get a new verification code.",
+            "error",
+        )
+        return None
+
+    code = request.form.get("verification_code", "").strip()
+    if not re.fullmatch(r"\d{6}", code):
+        flash("Enter the 6-digit verification code from your email.", "error")
+        return None
+
+    if pending.otp_is_expired():
+        flash("Your verification code has expired. Please request a new code.", "error")
+        return None
+
+    if not pending.verify_otp(code):
+        attempts = pending_registrations.increment_attempts(email)
+        remaining = VERIFICATION_MAX_ATTEMPTS - attempts
+        if remaining <= 0:
+            flash(
+                "Too many incorrect attempts. Use Resend code to get a new verification code.",
+                "error",
+            )
+        else:
+            flash(
+                "Invalid verification code. Please check your email and try again.",
+                "error",
+            )
+        return None
+
+    now = utc_now_naive()
+    try:
+        customer_id = customer_accounts.create_verified_from_pending(
+            pending.full_name,
+            pending.email,
+            pending.password_hash,
+            now,
+        )
+    except mysql.connector.IntegrityError:
+        flash("A customer account with that email already exists. Please sign in.", "error")
+        pending_registrations.delete_by_email(email)
+        clear_email_verification_session()
+        return redirect(url_for("customer_login"))
+
+    # Idempotent cleanup for repositories that do not delete pending in-transaction.
+    pending_registrations.delete_by_email(email)
+
+    active_code = email_verification_codes.get_active(
+        email, CUSTOMER_VERIFY_MODE_REGISTRATION
+    )
+    if active_code is not None:
+        email_verification_codes.mark_used(active_code.id)
+
+    clear_email_verification_session()
+    notify_welcome(email, pending.full_name, "customer")
+    flash(
+        "Your email has been successfully verified! Your account has been created.",
+        "success",
+    )
+    session["show_verification_success_modal"] = True
+    # customer_id kept only for audit clarity; user must sign in next.
+    _ = customer_id
+    return redirect(url_for("customer_login"))
+
+
+def handle_first_login_verification_post(customer: CustomerAccount, action: str):
+    email = customer.email
+    active = email_verification_codes.get_active(email, CUSTOMER_VERIFY_MODE_FIRST_LOGIN)
+
+    if action == "resend":
+        last_sent = active.created_at if active else None
+        wait_seconds = pending_resend_cooldown_remaining(last_sent)
+        if wait_seconds > 0:
+            flash(
+                f"Please wait {wait_seconds} seconds before requesting another code.",
+                "error",
+            )
+            return None
+        if not mail_service.is_configured:
+            flash(
+                "Email delivery is unavailable right now. First-login verification cannot continue.",
+                "error",
+            )
+            return None
+        code = issue_first_login_otp(customer)
+        if notify_verification_code(email, customer.full_name, code, "customer"):
+            begin_email_verification(email, "customer", CUSTOMER_VERIFY_MODE_FIRST_LOGIN)
+            session["pending_first_login_customer_id"] = customer.id
+        return None
+
+    if active is None:
+        flash("Your verification code has expired. Please request a new code.", "error")
+        return None
+    if active.attempts >= VERIFICATION_MAX_ATTEMPTS:
+        flash(
+            "Too many incorrect attempts. Use Resend code to get a new verification code.",
+            "error",
+        )
+        return None
+
+    code = request.form.get("verification_code", "").strip()
+    if not re.fullmatch(r"\d{6}", code):
+        flash("Enter the 6-digit verification code from your email.", "error")
+        return None
+    if active.is_expired():
+        flash("Your verification code has expired. Please request a new code.", "error")
+        return None
+    if not active.verify_otp(code):
+        attempts = email_verification_codes.increment_attempts(active.id)
+        remaining = VERIFICATION_MAX_ATTEMPTS - attempts
+        if remaining <= 0:
+            flash(
+                "Too many incorrect attempts. Use Resend code to get a new verification code.",
+                "error",
+            )
+        else:
+            flash(
+                "Invalid verification code. Please check your email and try again.",
+                "error",
+            )
+        return None
+
+    email_verification_codes.mark_used(active.id)
+    customer_accounts.mark_first_login_verified(customer.id)
+    clear_email_verification_session()
+    establish_customer_session(customer)
+    flash(f"Welcome, {customer.full_name}.", "success")
+    return redirect(url_for("customer_dashboard"))
 
 
 def notify_order_placed(order_id: int, order: CustomerOrder, customer) -> None:
@@ -693,28 +1000,37 @@ def customer_register():
             flash("Enter a name between 2 and 120 characters.", "error")
         elif not EMAIL_PATTERN.fullmatch(email) or len(email) > 254:
             flash("Enter a valid email address.", "error")
-        elif not password_length_is_valid(password):
-            flash(
-                f"Your password must be between {PASSWORD_MIN_LENGTH} and "
-                f"{PASSWORD_MAX_LENGTH} characters.",
-                "error",
-            )
+        elif password_policy_error(password):
+            flash(password_policy_error(password), "error")
         elif password != confirm_password:
             flash("The passwords do not match.", "error")
+        elif customer_accounts.get_by_email(email) is not None:
+            flash("A customer account with that email already exists.", "error")
+        elif not mail_service.is_configured:
+            flash(
+                "Email verification is temporarily unavailable. Please try again later.",
+                "error",
+            )
         else:
-            try:
-                customer = CustomerAccount.create(full_name, email, password)
-                customer.id = customer_accounts.create_account(customer)
-            except mysql.connector.IntegrityError as error:
-                if error.errno == 1062:
-                    flash("A customer account with that email already exists.", "error")
-                else:
-                    raise
-            else:
-                code = issue_verification_code(customer, "customer")
-                notify_verification_code(email, full_name, code, "customer")
-                begin_email_verification(email, "customer")
-                flash("Enter the verification code from your email to activate your account.", "success")
+            password_hash = generate_password_hash(password)
+            code, _pending = issue_pending_registration_otp(
+                full_name, email, password_hash
+            )
+            sent = notify_verification_code(
+                email,
+                full_name,
+                code,
+                "customer",
+                pending_registration=True,
+            )
+            if sent:
+                begin_email_verification(
+                    email, "customer", CUSTOMER_VERIFY_MODE_REGISTRATION
+                )
+                flash(
+                    "Enter the verification code from your email to create your account.",
+                    "success",
+                )
                 return redirect(url_for("customer_verify_email"))
     return render_template("customer_register.html")
 
@@ -723,35 +1039,125 @@ def customer_register():
 def customer_verify_email():
     if isinstance(session.get("customer_id"), int):
         return redirect(url_for("customer_dashboard"))
+
+    mode = session.get("pending_verification_mode", CUSTOMER_VERIFY_MODE_REGISTRATION)
     email = (
         request.form.get("email", "").strip().lower()
         or session.get("pending_verification_email", "")
     )
+    pending = None
     customer = None
     if email and EMAIL_PATTERN.fullmatch(email) and len(email) <= 254:
+        pending = pending_registrations.get_by_email(email)
         customer = customer_accounts.get_by_email(email)
+
+    if mode == CUSTOMER_VERIFY_MODE_FIRST_LOGIN:
+        return redirect(url_for("customer_first_login_verify"))
+
     if request.method == "POST":
         action = request.form.get("action", "verify")
         if not EMAIL_PATTERN.fullmatch(email) or len(email) > 254:
             flash("Enter the email address used during registration.", "error")
+        elif pending is not None:
+            response = handle_pending_registration_post(email, action)
+            if response is not None:
+                return response
+            pending = pending_registrations.get_by_email(email)
         elif customer is None:
-            flash("No customer account was found for that email.", "error")
+            flash("No pending registration was found for that email.", "error")
         elif customer.email_verified:
             flash("That email is already verified. Please sign in.", "info")
             return redirect(url_for("customer_login"))
         else:
+            # Legacy unverified accounts created before pending-registration flow.
             response = handle_verification_post(customer, "customer", email, action)
             if response is not None:
                 return response
             customer = customer_accounts.get_by_email(email)
+
+    expires_in_seconds = VERIFICATION_CODE_TTL_MINUTES * 60
+    if pending and pending.otp_expires_at:
+        expires = pending.otp_expires_at
+        if getattr(expires, "tzinfo", None) is not None:
+            expires = expires.astimezone(timezone.utc).replace(tzinfo=None)
+        expires_in_seconds = max(0, int((expires - utc_now_naive()).total_seconds()))
+
+    resend_wait = 0
+    if pending is not None:
+        resend_wait = pending_resend_cooldown_remaining(pending.last_sent_at)
+    elif customer is not None:
+        resend_wait = resend_cooldown_remaining(customer)
+
     return render_template(
-        "verify_email.html",
+        "customer_verify_otp.html",
+        verification_mode=CUSTOMER_VERIFY_MODE_REGISTRATION,
         account_type="customer",
         email=email,
         verify_endpoint="customer_verify_email",
         login_endpoint="customer_login",
         register_endpoint="customer_register",
-        resend_wait_seconds=resend_cooldown_remaining(customer) if customer else 0,
+        resend_wait_seconds=resend_wait,
+        expires_in_seconds=expires_in_seconds,
+        page_title="Verify your email",
+        page_subtitle="Enter the 6-digit code we sent to finish creating your account.",
+    )
+
+
+@app.route("/customer/first-login-verify", methods=("GET", "POST"))
+def customer_first_login_verify():
+    if isinstance(session.get("customer_id"), int):
+        return redirect(url_for("customer_dashboard"))
+
+    email = (
+        request.form.get("email", "").strip().lower()
+        or session.get("pending_verification_email", "")
+    )
+    customer_id = session.get("pending_first_login_customer_id")
+    customer = None
+    if isinstance(customer_id, int):
+        customer = customer_accounts.get_by_id(customer_id)
+    elif email and EMAIL_PATTERN.fullmatch(email) and len(email) <= 254:
+        customer = customer_accounts.get_by_email(email)
+
+    if customer is None or not customer.email_verified:
+        flash("Please sign in first to continue first-login verification.", "info")
+        return redirect(url_for("customer_login"))
+    if customer.first_login_verified:
+        flash("First-login verification is already complete. Please sign in.", "info")
+        return redirect(url_for("customer_login"))
+
+    if request.method == "POST":
+        action = request.form.get("action", "verify")
+        response = handle_first_login_verification_post(customer, action)
+        if response is not None:
+            return response
+        customer = customer_accounts.get_by_id(customer.id)
+
+    active = email_verification_codes.get_active(
+        customer.email, CUSTOMER_VERIFY_MODE_FIRST_LOGIN
+    )
+    expires_in_seconds = VERIFICATION_CODE_TTL_MINUTES * 60
+    resend_wait = 0
+    if active is not None:
+        if active.expires_at:
+            expires = active.expires_at
+            if getattr(expires, "tzinfo", None) is not None:
+                expires = expires.astimezone(timezone.utc).replace(tzinfo=None)
+            expires_in_seconds = max(0, int((expires - utc_now_naive()).total_seconds()))
+        resend_wait = pending_resend_cooldown_remaining(active.created_at)
+
+    return render_template(
+        "customer_verify_otp.html",
+        verification_mode=CUSTOMER_VERIFY_MODE_FIRST_LOGIN,
+        account_type="customer",
+        email=customer.email,
+        verify_endpoint="customer_first_login_verify",
+        login_endpoint="customer_login",
+        register_endpoint="customer_register",
+        resend_wait_seconds=resend_wait,
+        expires_in_seconds=expires_in_seconds,
+        page_title="Confirm your first sign-in",
+        page_subtitle="Enter the 6-digit code we sent to finish securing your account.",
     )
 
 
@@ -759,6 +1165,7 @@ def customer_verify_email():
 def customer_login():
     if isinstance(session.get("customer_id"), int):
         return redirect(url_for("customer_dashboard"))
+    show_success_modal = bool(session.pop("show_verification_success_modal", False))
     if request.method == "POST":
         email = request.form.get("email", "").strip().lower()
         password = request.form.get("password", "")
@@ -773,17 +1180,45 @@ def customer_login():
             or len(password) > PASSWORD_MAX_LENGTH
             or not customer.verify_password(password)
         ):
+            # Pending registrations are not real accounts yet.
             flash("Email or password is incorrect.", "error")
         elif not customer.email_verified:
-            begin_email_verification(email, "customer")
+            begin_email_verification(email, "customer", CUSTOMER_VERIFY_MODE_REGISTRATION)
             flash("Please verify your email before signing in.", "info")
             return redirect(url_for("customer_verify_email"))
+        elif not customer.first_login_verified:
+            if not mail_service.is_configured:
+                flash(
+                    "First-login email verification is required, but email delivery is unavailable.",
+                    "error",
+                )
+            else:
+                code = issue_first_login_otp(customer)
+                sent = notify_verification_code(
+                    email, customer.full_name, code, "customer"
+                )
+                if sent:
+                    begin_email_verification(
+                        email, "customer", CUSTOMER_VERIFY_MODE_FIRST_LOGIN
+                    )
+                    session["pending_first_login_customer_id"] = customer.id
+                    flash(
+                        "Enter the verification code from your email to finish your first sign-in.",
+                        "info",
+                    )
+                    return redirect(url_for("customer_first_login_verify"))
+                flash(
+                    "We could not send the first-login verification email. Please try again.",
+                    "error",
+                )
         else:
-            session.clear()
-            session["customer_id"] = customer.id
+            establish_customer_session(customer)
             flash(f"Welcome, {customer.full_name}.", "success")
             return redirect(url_for("customer_dashboard"))
-    return render_template("customer_login.html")
+    return render_template(
+        "customer_login.html",
+        show_verification_success_modal=show_success_modal,
+    )
 
 
 @app.post("/customer/auth/firebase")
@@ -835,6 +1270,9 @@ def customer_firebase_auth():
         if not account.email_verified:
             customer_accounts.mark_email_verified(account.id)
             account.email_verified = True
+        if not account.first_login_verified:
+            customer_accounts.mark_first_login_verified(account.id)
+            account.first_login_verified = True
 
     session.clear()
     session["customer_id"] = account.id
@@ -852,8 +1290,8 @@ def customer_firebase_auth():
 @customer_login_required
 def customer_logout():
     session.clear()
-    flash("You have been signed out.", "success")
-    return redirect(url_for("home"))
+    flash("You have successfully logged out.", "success")
+    return redirect(url_for("customer_login"))
 
 
 @app.post("/customer/cart/add/<int:product_id>")
@@ -1289,14 +1727,26 @@ def staff_verify_email():
             if response is not None:
                 return response
             user = users.get_by_email(email)
+    expires_in_seconds = VERIFICATION_CODE_TTL_MINUTES * 60
+    resend_wait = resend_cooldown_remaining(user) if user else 0
+    if user and user.verification_expires_at:
+        expires = user.verification_expires_at
+        if getattr(expires, "tzinfo", None) is not None:
+            expires = expires.astimezone(timezone.utc).replace(tzinfo=None)
+        expires_in_seconds = max(0, int((expires - utc_now_naive()).total_seconds()))
+
     return render_template(
-        "verify_email.html",
+        "customer_verify_otp.html",
+        verification_mode="registration",
         account_type="staff",
         email=email,
         verify_endpoint="staff_verify_email",
         login_endpoint="login",
         register_endpoint="register",
-        resend_wait_seconds=resend_cooldown_remaining(user) if user else 0,
+        resend_wait_seconds=resend_wait,
+        expires_in_seconds=expires_in_seconds,
+        page_title="Verify your email",
+        page_subtitle="Enter the 6-digit code we sent to finish creating your staff account.",
     )
 
 
@@ -1323,12 +1773,8 @@ def register():
             flash("Enter a name between 2 and 120 characters.", "error")
         elif not EMAIL_PATTERN.fullmatch(email) or len(email) > 254:
             flash("Enter a valid email address.", "error")
-        elif not password_length_is_valid(password):
-            flash(
-                f"Your password must be between {PASSWORD_MIN_LENGTH} and "
-                f"{PASSWORD_MAX_LENGTH} characters.",
-                "error",
-            )
+        elif password_policy_error(password):
+            flash(password_policy_error(password), "error")
         elif password != confirm_password:
             flash("The passwords do not match.", "error")
         else:

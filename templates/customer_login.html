@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
-    <link href="{{ url_for('static', filename='css/style.css', v=9) }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css', v=10) }}" rel="stylesheet">
 </head>
 <body class="site-page auth-background auth-login">
     <a class="auth-page-back" href="{{ url_for('home') }}" data-history-back aria-label="Go back" title="Go back">←</a>
@@ -42,7 +42,7 @@
                 </div>
                 <div class="form-field">
                     <label for="password">Password</label>
-                    <input id="password" name="password" type="password" minlength="10" maxlength="128" autocomplete="current-password" placeholder="Enter your password" required>
+                    <input id="password" name="password" type="password" maxlength="128" autocomplete="current-password" placeholder="Enter your password" required>
                 </div>
                 <button class="button button-full" type="submit">Sign in</button>
             </form>
@@ -50,7 +50,21 @@
             <p class="auth-switch">Staff member? <a href="{{ url_for('login') }}">Log in to the staff workspace</a></p>
         </section>
     </main>
+    {% if show_verification_success_modal %}
+    <dialog class="app-modal" id="verification-success-modal" data-app-modal open>
+        <div class="app-modal-card">
+            <p class="app-modal-kicker">Registration</p>
+            <h2 class="app-modal-title">Email verified</h2>
+            <p class="app-modal-copy">Your email has been successfully verified! Your account has been created.</p>
+            <div class="app-modal-actions">
+                <button class="button" type="button" data-close-modal>Continue to sign in</button>
+            </div>
+        </div>
+    </dialog>
+    {% endif %}
     <script src="{{ url_for('static', filename='js/navigation.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='js/session_guard.js') }}" defer></script>
     <script src="{{ url_for('static', filename='js/form_validation.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='js/app_modals.js') }}" defer></script>
 </body>
 </html>

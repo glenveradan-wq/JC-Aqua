@@ -27,12 +27,50 @@ SCHEMA = (
         email VARCHAR(254) NOT NULL UNIQUE,
         password_hash VARCHAR(255) NOT NULL,
         email_verified BOOLEAN NOT NULL DEFAULT FALSE,
+        email_verified_at DATETIME NULL,
+        first_login_verified BOOLEAN NOT NULL DEFAULT FALSE,
+        first_login_verified_at DATETIME NULL,
         verification_code_hash VARCHAR(255) NULL,
         verification_expires_at DATETIME NULL,
         verification_attempts INT UNSIGNED NOT NULL DEFAULT 0,
         verification_last_sent_at DATETIME NULL,
         firebase_uid VARCHAR(128) NULL UNIQUE,
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS pending_registrations (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        full_name VARCHAR(120) NOT NULL,
+        email VARCHAR(254) NOT NULL,
+        password_hash VARCHAR(255) NOT NULL,
+        otp_hash VARCHAR(255) NOT NULL,
+        otp_expires_at DATETIME NOT NULL,
+        attempts INT UNSIGNED NOT NULL DEFAULT 0,
+        last_sent_at DATETIME NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_pending_registrations_email (email),
+        KEY idx_pending_registrations_expires (otp_expires_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS email_verification_codes (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        customer_id BIGINT UNSIGNED NULL,
+        email VARCHAR(254) NOT NULL,
+        otp_hash VARCHAR(255) NOT NULL,
+        verification_type ENUM('registration', 'first_login') NOT NULL,
+        expires_at DATETIME NOT NULL,
+        attempts INT UNSIGNED NOT NULL DEFAULT 0,
+        is_used BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        verified_at DATETIME NULL,
+        KEY idx_evc_email_type (email, verification_type),
+        KEY idx_evc_customer (customer_id),
+        KEY idx_evc_expires (expires_at),
+        CONSTRAINT fk_evc_customer
+            FOREIGN KEY (customer_id) REFERENCES customer_accounts(id)
+            ON DELETE CASCADE ON UPDATE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     """,
     """
@@ -209,9 +247,67 @@ def _ensure_verification_columns(cursor, table_name: str) -> None:
         )
 
 
+def _table_exists(cursor, table_name: str) -> bool:
+    cursor.execute(
+        """
+        SELECT 1
+        FROM INFORMATION_SCHEMA.TABLES
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = %s
+        """,
+        (table_name,),
+    )
+    return cursor.fetchone() is not None
+
+
+def _ensure_customer_login_verification_columns(cursor) -> None:
+    cursor.execute(
+        """
+        SELECT COLUMN_NAME
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = 'customer_accounts'
+        """
+    )
+    columns = {row[0] for row in cursor.fetchall()}
+    if "email_verified_at" not in columns:
+        cursor.execute(
+            """
+            ALTER TABLE customer_accounts
+            ADD email_verified_at DATETIME NULL
+            """
+        )
+    if "first_login_verified" not in columns:
+        cursor.execute(
+            """
+            ALTER TABLE customer_accounts
+            ADD first_login_verified BOOLEAN NOT NULL DEFAULT FALSE
+            """
+        )
+    if "first_login_verified_at" not in columns:
+        cursor.execute(
+            """
+            ALTER TABLE customer_accounts
+            ADD first_login_verified_at DATETIME NULL
+            """
+        )
+    # Existing verified customers stay signed-in capable (no forced first-login OTP).
+    cursor.execute(
+        """
+        UPDATE customer_accounts
+        SET first_login_verified = TRUE,
+            first_login_verified_at = COALESCE(first_login_verified_at, UTC_TIMESTAMP()),
+            email_verified_at = COALESCE(email_verified_at, UTC_TIMESTAMP())
+        WHERE email_verified = TRUE
+          AND first_login_verified = FALSE
+        """
+    )
+
+
 def migrate_existing_schema(cursor) -> None:
     _ensure_verification_columns(cursor, "users")
     _ensure_verification_columns(cursor, "customer_accounts")
+    _ensure_customer_login_verification_columns(cursor)
 
     cursor.execute(
         """
@@ -227,6 +323,49 @@ def migrate_existing_schema(cursor) -> None:
             """
             ALTER TABLE customer_accounts
             ADD firebase_uid VARCHAR(128) NULL UNIQUE
+            """
+        )
+
+    if not _table_exists(cursor, "pending_registrations"):
+        cursor.execute(
+            """
+            CREATE TABLE pending_registrations (
+                id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                full_name VARCHAR(120) NOT NULL,
+                email VARCHAR(254) NOT NULL,
+                password_hash VARCHAR(255) NOT NULL,
+                otp_hash VARCHAR(255) NOT NULL,
+                otp_expires_at DATETIME NOT NULL,
+                attempts INT UNSIGNED NOT NULL DEFAULT 0,
+                last_sent_at DATETIME NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE KEY uq_pending_registrations_email (email),
+                KEY idx_pending_registrations_expires (otp_expires_at)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """
+        )
+
+    if not _table_exists(cursor, "email_verification_codes"):
+        cursor.execute(
+            """
+            CREATE TABLE email_verification_codes (
+                id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                customer_id BIGINT UNSIGNED NULL,
+                email VARCHAR(254) NOT NULL,
+                otp_hash VARCHAR(255) NOT NULL,
+                verification_type ENUM('registration', 'first_login') NOT NULL,
+                expires_at DATETIME NOT NULL,
+                attempts INT UNSIGNED NOT NULL DEFAULT 0,
+                is_used BOOLEAN NOT NULL DEFAULT FALSE,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                verified_at DATETIME NULL,
+                KEY idx_evc_email_type (email, verification_type),
+                KEY idx_evc_customer (customer_id),
+                KEY idx_evc_expires (expires_at),
+                CONSTRAINT fk_evc_customer
+                    FOREIGN KEY (customer_id) REFERENCES customer_accounts(id)
+                    ON DELETE CASCADE ON UPDATE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             """
         )
 

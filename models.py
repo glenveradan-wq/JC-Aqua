@@ -95,6 +95,9 @@ class CustomerAccount:
     email: str
     password_hash: str
     email_verified: bool = False
+    email_verified_at: datetime | None = None
+    first_login_verified: bool = False
+    first_login_verified_at: datetime | None = None
     verification_code_hash: str | None = None
     verification_expires_at: datetime | None = None
     verification_attempts: int = 0
@@ -109,6 +112,7 @@ class CustomerAccount:
             email=email,
             password_hash=generate_password_hash(password),
             email_verified=False,
+            first_login_verified=False,
         )
 
     @classmethod
@@ -120,12 +124,16 @@ class CustomerAccount:
     ) -> "CustomerAccount":
         # Local password login is disabled for Firebase-only accounts.
         random_secret = f"firebase:{firebase_uid}:{secrets.token_urlsafe(24)}"
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         return cls(
             id=0,
             full_name=full_name,
             email=email,
             password_hash=generate_password_hash(random_secret),
             email_verified=True,
+            email_verified_at=now,
+            first_login_verified=True,
+            first_login_verified_at=now,
             firebase_uid=firebase_uid,
         )
 
@@ -137,6 +145,9 @@ class CustomerAccount:
             email=row["email"],
             password_hash=row["password_hash"],
             email_verified=bool(row.get("email_verified", False)),
+            email_verified_at=row.get("email_verified_at"),
+            first_login_verified=bool(row.get("first_login_verified", False)),
+            first_login_verified_at=row.get("first_login_verified_at"),
             verification_code_hash=row.get("verification_code_hash"),
             verification_expires_at=row.get("verification_expires_at"),
             verification_attempts=int(row.get("verification_attempts") or 0),
@@ -155,6 +166,86 @@ class CustomerAccount:
         ).replace(tzinfo=None):
             return False
         return check_password_hash(self.verification_code_hash, code)
+
+
+@dataclass
+class PendingRegistration:
+    id: int
+    full_name: str
+    email: str
+    password_hash: str
+    otp_hash: str
+    otp_expires_at: datetime
+    attempts: int = 0
+    last_sent_at: datetime | None = None
+    created_at: datetime | None = None
+
+    @classmethod
+    def from_row(cls, row: dict) -> "PendingRegistration":
+        return cls(
+            id=int(row["id"]),
+            full_name=row["full_name"],
+            email=row["email"],
+            password_hash=row["password_hash"],
+            otp_hash=row["otp_hash"],
+            otp_expires_at=row["otp_expires_at"],
+            attempts=int(row.get("attempts") or 0),
+            last_sent_at=row.get("last_sent_at"),
+            created_at=row.get("created_at"),
+        )
+
+    def otp_is_expired(self, now: datetime | None = None) -> bool:
+        current = now or datetime.now(timezone.utc).replace(tzinfo=None)
+        expires = self.otp_expires_at
+        if getattr(expires, "tzinfo", None) is not None:
+            expires = expires.astimezone(timezone.utc).replace(tzinfo=None)
+        return expires < current
+
+    def verify_otp(self, code: str, now: datetime | None = None) -> bool:
+        if not self.otp_hash or self.otp_is_expired(now):
+            return False
+        return check_password_hash(self.otp_hash, code)
+
+
+@dataclass
+class EmailVerificationCode:
+    id: int
+    email: str
+    otp_hash: str
+    verification_type: str
+    expires_at: datetime
+    customer_id: int | None = None
+    attempts: int = 0
+    is_used: bool = False
+    created_at: datetime | None = None
+    verified_at: datetime | None = None
+
+    @classmethod
+    def from_row(cls, row: dict) -> "EmailVerificationCode":
+        return cls(
+            id=int(row["id"]),
+            email=row["email"],
+            otp_hash=row["otp_hash"],
+            verification_type=row["verification_type"],
+            expires_at=row["expires_at"],
+            customer_id=row.get("customer_id"),
+            attempts=int(row.get("attempts") or 0),
+            is_used=bool(row.get("is_used", False)),
+            created_at=row.get("created_at"),
+            verified_at=row.get("verified_at"),
+        )
+
+    def is_expired(self, now: datetime | None = None) -> bool:
+        current = now or datetime.now(timezone.utc).replace(tzinfo=None)
+        expires = self.expires_at
+        if getattr(expires, "tzinfo", None) is not None:
+            expires = expires.astimezone(timezone.utc).replace(tzinfo=None)
+        return expires < current
+
+    def verify_otp(self, code: str, now: datetime | None = None) -> bool:
+        if self.is_used or not self.otp_hash or self.is_expired(now):
+            return False
+        return check_password_hash(self.otp_hash, code)
 
 
 @dataclass

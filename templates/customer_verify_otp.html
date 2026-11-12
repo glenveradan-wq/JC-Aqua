@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#0f4a52">
+    {% include "_favicon.html" %}
+    <title>{{ page_title }} | JC Aqua Fish Shop</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css', v=11) }}" rel="stylesheet">
+</head>
+<body class="site-page auth-background auth-login">
+    <a class="auth-page-back" href="{{ url_for('home') }}" data-history-back aria-label="Go back" title="Go back">←</a>
+    <main class="auth-wrap auth-login-wrap">
+        <section class="auth-intro" aria-label="JC Aqua Fish Shop">
+            <a class="auth-brand" href="{{ url_for('home') }}">
+                <img
+                    src="{{ url_for('static', filename='images/jc-aqua-logo.jpg') }}"
+                    alt="JC Aqua Fish Shop"
+                    width="40"
+                    height="40">
+                <span>JC Aqua Fish Shop</span>
+            </a>
+            <p class="auth-intro-label">
+                {% if account_type == "staff" %}Staff workspace{% else %}Customer account{% endif %}
+            </p>
+            <h1>{{ page_title }}</h1>
+            <p>{{ page_subtitle }}</p>
+        </section>
+        <section class="auth-card auth-login-card" aria-labelledby="verify-title">
+            <header class="auth-heading">
+                <p class="auth-form-label">Email verification</p>
+                <h2 id="verify-title">Enter code</h2>
+                <p>
+                    We sent a 6-digit code to
+                    <strong class="otp-email-target">{{ email or "your email" }}</strong>.
+                    Codes expire in 5 minutes. Resend unlocks after 1 minute.
+                </p>
+            </header>
+            {% include "_flashes.html" %}
+            <form
+                id="otp-verify-form"
+                class="otp-verify-form"
+                method="post"
+                action="{{ url_for(verify_endpoint) }}"
+                data-otp-form
+                data-expires-seconds="{{ expires_in_seconds }}"
+                data-resend-seconds="{{ resend_wait_seconds }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="action" value="verify">
+                <input type="hidden" name="email" value="{{ email }}">
+                <input type="hidden" name="verification_code" id="verification-code" value="" required>
+                <div class="form-field">
+                    <label for="otp-digit-0">Verification code</label>
+                    <div class="otp-digit-row" role="group" aria-label="Six digit verification code">
+                        {% for i in range(6) %}
+                        <input
+                            class="otp-digit"
+                            id="otp-digit-{{ i }}"
+                            type="text"
+                            inputmode="numeric"
+                            pattern="[0-9]"
+                            maxlength="1"
+                            autocomplete="{% if i == 0 %}one-time-code{% else %}off{% endif %}"
+                            aria-label="Digit {{ i + 1 }}"
+                            data-otp-digit="{{ i }}">
+                        {% endfor %}
+                    </div>
+                    <p class="otp-timer" data-otp-timer aria-live="polite">
+                        Code expires in <span data-otp-timer-value>5:00</span>
+                    </p>
+                </div>
+                <button class="button button-full" type="submit" data-otp-submit>
+                    <span data-otp-submit-label>Verify</span>
+                    <span class="otp-loading" data-otp-loading hidden>Verifying…</span>
+                </button>
+            </form>
+            <form
+                class="verify-resend-form"
+                method="post"
+                action="{{ url_for(verify_endpoint) }}"
+                data-otp-resend-form>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="action" value="resend">
+                <input type="hidden" name="email" value="{{ email }}">
+                <p class="otp-resend-countdown" data-otp-resend-countdown {% if not resend_wait_seconds %}hidden{% endif %}>
+                    {% if resend_wait_seconds %}
+                    You can request another code in {{ '%d:%02d' % ((resend_wait_seconds // 60), (resend_wait_seconds % 60)) }}.
+                    {% endif %}
+                </p>
+                <button
+                    class="button button-full button-secondary"
+                    type="submit"
+                    data-otp-resend
+                    {% if not email or resend_wait_seconds %}disabled{% endif %}>
+                    <span data-otp-resend-label>
+                        {% if resend_wait_seconds %}
+                            Resend available in {{ '%d:%02d' % ((resend_wait_seconds // 60), (resend_wait_seconds % 60)) }}
+                        {% else %}
+                            Resend code
+                        {% endif %}
+                    </span>
+                    <span class="otp-loading" data-otp-resend-loading hidden>Sending…</span>
+                </button>
+            </form>
+            <p class="auth-switch">Already verified? <a href="{{ url_for(login_endpoint) }}">Sign in</a></p>
+            {% if verification_mode == "registration" %}
+            <p class="auth-switch">Need a new account? <a href="{{ url_for(register_endpoint) }}">Register</a></p>
+            {% endif %}
+        </section>
+    </main>
+    <script src="{{ url_for('static', filename='js/navigation.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='js/session_guard.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='js/otp_verification.js') }}" defer></script>
+</body>
+</html>

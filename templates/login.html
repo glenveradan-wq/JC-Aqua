@@ -58,7 +58,6 @@
                         id="password"
                         name="password"
                         type="password"
-                        minlength="10"
                         maxlength="128"
                         autocomplete="current-password"
                         placeholder="Enter your password"
@@ -72,6 +71,7 @@
         </section>
     </main>
     <script src="{{ url_for('static', filename='js/navigation.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='js/session_guard.js') }}" defer></script>
     <script src="{{ url_for('static', filename='js/form_validation.js') }}" defer></script>
 </body>
 </html>

@@ -7,9 +7,40 @@ os.environ.setdefault("FLASK_SECRET_KEY", "test-only-secret-key")
 
 import app as app_module
 import inventory_bp as inventory_module
-from mail import MailService
-from models import Category, CustomerAccount, CustomerOrder, OrderItem, Product, User
+from models import (
+    Category,
+    CustomerAccount,
+    CustomerOrder,
+    EmailVerificationCode,
+    OrderItem,
+    PendingRegistration,
+    Product,
+    User,
+)
 from repositories import InventoryConflictError
+from werkzeug.security import check_password_hash
+
+
+class FakeMailService:
+    def __init__(self):
+        self.enabled = True
+        self.sent = []
+
+    @property
+    def is_configured(self):
+        return True
+
+    def send_verification_code(self, recipient, full_name, code, account_type):
+        self.sent.append(("verification", recipient, code, account_type))
+        return True
+
+    def send_welcome_email(self, recipient, full_name, account_type):
+        self.sent.append(("welcome", recipient, full_name, account_type))
+        return True
+
+    def send_order_confirmation(self, recipient, full_name, order_id, total, delivery_option):
+        self.sent.append(("order", recipient, order_id))
+        return True
 
 
 class FakeCustomerAccountRepository:
@@ -22,6 +53,18 @@ class FakeCustomerAccountRepository:
         self.accounts_by_email[account.email] = account
         self.accounts_by_id[account.id] = account
         return account.id
+
+    def create_verified_from_pending(self, full_name, email, password_hash, verified_at):
+        account = CustomerAccount(
+            id=0,
+            full_name=full_name,
+            email=email,
+            password_hash=password_hash,
+            email_verified=True,
+            email_verified_at=verified_at,
+            first_login_verified=False,
+        )
+        return self.create_account(account)
 
     def get_by_email(self, email):
         return self.accounts_by_email.get(email)
@@ -39,6 +82,7 @@ class FakeCustomerAccountRepository:
         account = self.accounts_by_id[customer_id]
         account.firebase_uid = firebase_uid
         account.email_verified = True
+        account.first_login_verified = True
 
     def set_verification_challenge(
         self,
@@ -62,10 +106,16 @@ class FakeCustomerAccountRepository:
     def mark_email_verified(self, customer_id):
         account = self.accounts_by_id[customer_id]
         account.email_verified = True
+        account.email_verified_at = datetime.utcnow()
         account.verification_code_hash = None
         account.verification_expires_at = None
         account.verification_attempts = 0
         account.verification_last_sent_at = None
+
+    def mark_first_login_verified(self, customer_id):
+        account = self.accounts_by_id[customer_id]
+        account.first_login_verified = True
+        account.first_login_verified_at = datetime.utcnow()
 
     def update_profile(self, customer_id, full_name, email, password_hash=None):
         account = self.accounts_by_id[customer_id]
@@ -75,6 +125,102 @@ class FakeCustomerAccountRepository:
         if password_hash is not None:
             account.password_hash = password_hash
         self.accounts_by_email[email] = account
+
+
+class FakePendingRegistrationRepository:
+    def __init__(self):
+        self.by_email = {}
+
+    def get_by_email(self, email):
+        return self.by_email.get(email)
+
+    def upsert(self, full_name, email, password_hash, otp_hash, otp_expires_at, last_sent_at):
+        existing = self.by_email.get(email)
+        pending_id = existing.id if existing else len(self.by_email) + 1
+        pending = PendingRegistration(
+            id=pending_id,
+            full_name=full_name,
+            email=email,
+            password_hash=password_hash,
+            otp_hash=otp_hash,
+            otp_expires_at=otp_expires_at,
+            attempts=0,
+            last_sent_at=last_sent_at,
+            created_at=datetime.utcnow(),
+        )
+        self.by_email[email] = pending
+        return pending_id
+
+    def set_otp(self, email, otp_hash, otp_expires_at, last_sent_at):
+        pending = self.by_email[email]
+        pending.otp_hash = otp_hash
+        pending.otp_expires_at = otp_expires_at
+        pending.attempts = 0
+        pending.last_sent_at = last_sent_at
+
+    def increment_attempts(self, email):
+        pending = self.by_email[email]
+        pending.attempts += 1
+        return pending.attempts
+
+    def delete_by_email(self, email):
+        self.by_email.pop(email, None)
+
+
+class FakeEmailVerificationCodeRepository:
+    def __init__(self):
+        self.codes = []
+        self.next_id = 1
+
+    def invalidate_active(self, email, verification_type):
+        for code in self.codes:
+            if (
+                code.email == email
+                and code.verification_type == verification_type
+                and not code.is_used
+            ):
+                code.is_used = True
+
+    def create_code(self, email, otp_hash, verification_type, expires_at, customer_id=None):
+        self.invalidate_active(email, verification_type)
+        code = EmailVerificationCode(
+            id=self.next_id,
+            email=email,
+            otp_hash=otp_hash,
+            verification_type=verification_type,
+            expires_at=expires_at,
+            customer_id=customer_id,
+            attempts=0,
+            is_used=False,
+            created_at=datetime.utcnow(),
+        )
+        self.next_id += 1
+        self.codes.append(code)
+        return code.id
+
+    def get_active(self, email, verification_type):
+        for code in reversed(self.codes):
+            if (
+                code.email == email
+                and code.verification_type == verification_type
+                and not code.is_used
+            ):
+                return code
+        return None
+
+    def increment_attempts(self, code_id):
+        for code in self.codes:
+            if code.id == code_id:
+                code.attempts += 1
+                return code.attempts
+        return 0
+
+    def mark_used(self, code_id):
+        for code in self.codes:
+            if code.id == code_id:
+                code.is_used = True
+                code.verified_at = datetime.utcnow()
+                return
 
 
 class FakeUserRepository:
@@ -140,6 +286,7 @@ def verified_user(full_name, email, password):
 def verified_customer(full_name, email, password):
     account = CustomerAccount.create(full_name, email, password)
     account.email_verified = True
+    account.first_login_verified = True
     return account
 
 class FakeOrderRepository:
@@ -430,6 +577,8 @@ class ApplicationTests(unittest.TestCase):
     def setUp(self):
         self.previous_users = app_module.users
         self.previous_customer_accounts = app_module.customer_accounts
+        self.previous_pending_registrations = app_module.pending_registrations
+        self.previous_email_verification_codes = app_module.email_verification_codes
         self.previous_orders = app_module.orders
         self.previous_products = app_module.products
         self.previous_categories = app_module.categories
@@ -445,6 +594,8 @@ class ApplicationTests(unittest.TestCase):
         app_module.app.config["SESSION_COOKIE_SECURE"] = False
         self.users = FakeUserRepository()
         self.customer_accounts = FakeCustomerAccountRepository()
+        self.pending_registrations = FakePendingRegistrationRepository()
+        self.email_verification_codes = FakeEmailVerificationCodeRepository()
         self.orders = FakeOrderRepository()
         self.products = FakeProductRepository()
         self.category_repo = FakeCategoryRepository()
@@ -452,6 +603,8 @@ class ApplicationTests(unittest.TestCase):
         self.orders.products_repo = self.products
         app_module.users = self.users
         app_module.customer_accounts = self.customer_accounts
+        app_module.pending_registrations = self.pending_registrations
+        app_module.email_verification_codes = self.email_verification_codes
         app_module.orders = self.orders
         app_module.products = self.products
         app_module.categories = self.category_repo
@@ -459,7 +612,7 @@ class ApplicationTests(unittest.TestCase):
         inventory_module.categories = self.category_repo
         inventory_module.stock_movements = self.stock_repo
         inventory_module.users = self.users
-        app_module.mail_service = MailService()
+        app_module.mail_service = FakeMailService()
         app_module.app.config.update(
             TESTING=True,
             WTF_CSRF_ENABLED=False,
@@ -469,6 +622,8 @@ class ApplicationTests(unittest.TestCase):
     def tearDown(self):
         app_module.users = self.previous_users
         app_module.customer_accounts = self.previous_customer_accounts
+        app_module.pending_registrations = self.previous_pending_registrations
+        app_module.email_verification_codes = self.previous_email_verification_codes
         app_module.orders = self.previous_orders
         app_module.products = self.previous_products
         app_module.categories = self.previous_categories
@@ -548,7 +703,7 @@ class ApplicationTests(unittest.TestCase):
         self.assertIn(b'alt="JC Aqua Fish Shop"', catalog.data)
 
         account = verified_customer(
-            "Aqua Customer", "customer@example.com", "customer-password-1"
+            "Aqua Customer", "customer@example.com", "CustomerPass1"
         )
         account.id = self.customer_accounts.create_account(account)
         with self.client.session_transaction() as session:
@@ -578,7 +733,7 @@ class ApplicationTests(unittest.TestCase):
             data={
                 "full_name": "Aqua Staff",
                 "email": "staff@example.com",
-                "password": "long-password-1",
+                "password": "LongPass123",
                 "confirm_password": "different-password",
                 "registration_code": "test-staff-invite",
             },
@@ -593,8 +748,8 @@ class ApplicationTests(unittest.TestCase):
             data={
                 "full_name": "Aqua Staff",
                 "email": "staff@example.com",
-                "password": "long-password-1",
-                "confirm_password": "long-password-1",
+                "password": "LongPass123",
+                "confirm_password": "LongPass123",
                 "registration_code": "test-staff-invite",
             },
         )
@@ -603,8 +758,8 @@ class ApplicationTests(unittest.TestCase):
         user = self.users.get_by_email("staff@example.com")
         self.assertIsNotNone(user)
         self.assertFalse(user.email_verified)
-        self.assertNotEqual(user.password_hash, "long-password-1")
-        self.assertTrue(user.verify_password("long-password-1"))
+        self.assertNotEqual(user.password_hash, "LongPass123")
+        self.assertTrue(user.verify_password("LongPass123"))
 
     def test_registration_allows_multiple_accounts(self):
         first_response = self.client.post(
@@ -612,8 +767,8 @@ class ApplicationTests(unittest.TestCase):
             data={
                 "full_name": "First Staff",
                 "email": "first@example.com",
-                "password": "long-password-1",
-                "confirm_password": "long-password-1",
+                "password": "LongPass123",
+                "confirm_password": "LongPass123",
                 "registration_code": "test-staff-invite",
             },
         )
@@ -631,8 +786,8 @@ class ApplicationTests(unittest.TestCase):
             data={
                 "full_name": "Second Staff",
                 "email": "second@example.com",
-                "password": "long-password-2",
-                "confirm_password": "long-password-2",
+                "password": "LongPass456",
+                "confirm_password": "LongPass456",
                 "registration_code": "test-staff-invite",
             },
         )
@@ -651,8 +806,8 @@ class ApplicationTests(unittest.TestCase):
             data={
                 "full_name": "Aqua Staff",
                 "email": "staff@example.com",
-                "password": "long-password-1",
-                "confirm_password": "long-password-1",
+                "password": "LongPass123",
+                "confirm_password": "LongPass123",
                 "registration_code": "any-code",
             },
         )
@@ -672,8 +827,8 @@ class ApplicationTests(unittest.TestCase):
             data={
                 "full_name": "Aqua Staff",
                 "email": "staff@example.com",
-                "password": "long-password-1",
-                "confirm_password": "long-password-1",
+                "password": "LongPass123",
+                "confirm_password": "LongPass123",
                 "registration_code": "wrong-code",
             },
         )
@@ -686,8 +841,8 @@ class ApplicationTests(unittest.TestCase):
             data={
                 "full_name": "Aqua Staff",
                 "email": "staff@example.com",
-                "password": "long-password-1",
-                "confirm_password": "long-password-1",
+                "password": "LongPass123",
+                "confirm_password": "LongPass123",
                 "registration_code": "shop-invite-77",
             },
         )
@@ -709,6 +864,10 @@ class ApplicationTests(unittest.TestCase):
         self.assertIn("script-src 'self'", csp)
         self.assertIn("https://www.gstatic.com", csp)
         self.assertNotIn("Strict-Transport-Security", response.headers)
+        self.assertIn("no-store", response.headers.get("Cache-Control", ""))
+
+        login = self.client.get("/customer/login")
+        self.assertIn("no-store", login.headers.get("Cache-Control", ""))
 
     def test_firebase_auth_endpoint_disabled_without_config(self):
         response = self.client.post(
@@ -729,7 +888,7 @@ class ApplicationTests(unittest.TestCase):
         )
 
     def test_login_rejects_oversized_password(self):
-        user = verified_user("Aqua Staff", "staff@example.com", "long-password-1")
+        user = verified_user("Aqua Staff", "staff@example.com", "LongPass123")
         self.users.create_account(user)
         response = self.client.post(
             "/login",
@@ -739,11 +898,11 @@ class ApplicationTests(unittest.TestCase):
         self.assertIn(b"Email or password is incorrect", response.data)
 
     def test_login_and_logout_manage_session(self):
-        user = verified_user("Aqua Staff", "staff@example.com", "long-password-1")
+        user = verified_user("Aqua Staff", "staff@example.com", "LongPass123")
         user.id = self.users.create_account(user)
         response = self.client.post(
             "/login",
-            data={"email": user.email, "password": "long-password-1"},
+            data={"email": user.email, "password": "LongPass123"},
         )
         self.assertEqual(response.status_code, 302)
         with self.client.session_transaction() as session:
@@ -755,7 +914,7 @@ class ApplicationTests(unittest.TestCase):
             self.assertNotIn("user_id", session)
 
     def test_login_rejects_invalid_password(self):
-        user = verified_user("Aqua Staff", "staff@example.com", "long-password-1")
+        user = verified_user("Aqua Staff", "staff@example.com", "LongPass123")
         self.users.create_account(user)
         response = self.client.post(
             "/login",
@@ -765,7 +924,7 @@ class ApplicationTests(unittest.TestCase):
         self.assertIn(b"Email or password is incorrect", response.data)
 
     def test_create_order_persists_multiple_validated_items(self):
-        user = verified_user("Aqua Staff", "staff@example.com", "long-password-1")
+        user = verified_user("Aqua Staff", "staff@example.com", "LongPass123")
         user.id = self.users.create_account(user)
         with self.client.session_transaction() as session:
             session["user_id"] = user.id
@@ -790,7 +949,7 @@ class ApplicationTests(unittest.TestCase):
         self.assertEqual(order.total, Decimal("130.50"))
 
     def test_create_order_rejects_negative_price(self):
-        user = verified_user("Aqua Staff", "staff@example.com", "long-password-1")
+        user = verified_user("Aqua Staff", "staff@example.com", "LongPass123")
         user.id = self.users.create_account(user)
         with self.client.session_transaction() as session:
             session["user_id"] = user.id
@@ -812,7 +971,7 @@ class ApplicationTests(unittest.TestCase):
         self.assertEqual(self.orders.created, [])
 
     def test_create_product_validates_and_saves_inventory(self):
-        user = verified_user("Aqua Staff", "staff@example.com", "long-password-1")
+        user = verified_user("Aqua Staff", "staff@example.com", "LongPass123")
         user.id = self.users.create_account(user)
         with self.client.session_transaction() as session:
             session["user_id"] = user.id
@@ -838,7 +997,7 @@ class ApplicationTests(unittest.TestCase):
         self.assertEqual(product.stock_quantity, 8)
 
     def test_create_product_rejects_invalid_values(self):
-        user = verified_user("Aqua Staff", "staff@example.com", "long-password-1")
+        user = verified_user("Aqua Staff", "staff@example.com", "LongPass123")
         user.id = self.users.create_account(user)
         with self.client.session_transaction() as session:
             session["user_id"] = user.id
@@ -858,7 +1017,7 @@ class ApplicationTests(unittest.TestCase):
         self.assertEqual(self.products.products, {})
 
     def test_product_edit_and_delete(self):
-        user = verified_user("Aqua Staff", "staff@example.com", "long-password-1")
+        user = verified_user("Aqua Staff", "staff@example.com", "LongPass123")
         user.id = self.users.create_account(user)
         self.products.create(
             Product(
@@ -890,7 +1049,7 @@ class ApplicationTests(unittest.TestCase):
         self.assertIsNone(self.products.get(1))
 
     def test_inventory_page_shows_product_and_active_navigation(self):
-        user = verified_user("Aqua Staff", "staff@example.com", "long-password-1")
+        user = verified_user("Aqua Staff", "staff@example.com", "LongPass123")
         user.id = self.users.create_account(user)
         self.products.create(
             Product(
@@ -921,7 +1080,7 @@ class ApplicationTests(unittest.TestCase):
         self.assertIn(b"nav-role-tag", response.data)
 
     def test_stock_in_updates_quantity_and_history(self):
-        user = verified_user("Aqua Staff", "staff@example.com", "long-password-1")
+        user = verified_user("Aqua Staff", "staff@example.com", "LongPass123")
         user.id = self.users.create_account(user)
         product_id = self.products.create(
             Product(
@@ -955,7 +1114,7 @@ class ApplicationTests(unittest.TestCase):
         self.assertIn(b"Delivery", history.data)
 
     def test_stock_out_rejects_oversell(self):
-        user = verified_user("Aqua Staff", "staff@example.com", "long-password-1")
+        user = verified_user("Aqua Staff", "staff@example.com", "LongPass123")
         user.id = self.users.create_account(user)
         product_id = self.products.create(
             Product(
@@ -1013,17 +1172,18 @@ class ApplicationTests(unittest.TestCase):
             data={
                 "full_name": "Aqua Customer",
                 "email": "customer@example.com",
-                "password": "customer-password-1",
-                "confirm_password": "customer-password-1",
+                "password": "CustomerPass1",
+                "confirm_password": "CustomerPass1",
             },
         )
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.headers["Location"], "/customer/verify")
-        account = self.customer_accounts.get_by_email("customer@example.com")
-        self.assertIsNotNone(account)
-        self.assertFalse(account.email_verified)
-        self.assertNotEqual(account.password_hash, "customer-password-1")
-        self.assertTrue(account.verify_password("customer-password-1"))
+        # Permanent account is created only after OTP verification.
+        self.assertIsNone(self.customer_accounts.get_by_email("customer@example.com"))
+        pending = self.pending_registrations.get_by_email("customer@example.com")
+        self.assertIsNotNone(pending)
+        self.assertNotEqual(pending.password_hash, "CustomerPass1")
+        self.assertTrue(check_password_hash(pending.password_hash, "CustomerPass1"))
         self.assertEqual(self.users.users_by_email, {})
 
     def test_customer_must_verify_email_before_login(self):
@@ -1035,21 +1195,22 @@ class ApplicationTests(unittest.TestCase):
                 data={
                     "full_name": "Aqua Customer",
                     "email": "customer@example.com",
-                    "password": "customer-password-1",
-                    "confirm_password": "customer-password-1",
+                    "password": "CustomerPass1",
+                    "confirm_password": "CustomerPass1",
                 },
             )
             self.assertEqual(register.headers["Location"], "/customer/verify")
+            self.assertIsNone(self.customer_accounts.get_by_email("customer@example.com"))
 
             blocked = self.client.post(
                 "/customer/login",
                 data={
                     "email": "customer@example.com",
-                    "password": "customer-password-1",
+                    "password": "CustomerPass1",
                 },
             )
-            self.assertEqual(blocked.status_code, 302)
-            self.assertEqual(blocked.headers["Location"], "/customer/verify")
+            self.assertEqual(blocked.status_code, 200)
+            self.assertIn(b"Email or password is incorrect", blocked.data)
 
             verified = self.client.post(
                 "/customer/verify",
@@ -1062,16 +1223,46 @@ class ApplicationTests(unittest.TestCase):
             self.assertEqual(verified.status_code, 302)
             self.assertEqual(verified.headers["Location"], "/customer/login")
             account = self.customer_accounts.get_by_email("customer@example.com")
+            self.assertIsNotNone(account)
             self.assertTrue(account.email_verified)
+            self.assertFalse(account.first_login_verified)
+            self.assertIsNone(self.pending_registrations.get_by_email("customer@example.com"))
 
-            logged_in = self.client.post(
+            first_login = self.client.post(
                 "/customer/login",
                 data={
                     "email": "customer@example.com",
-                    "password": "customer-password-1",
+                    "password": "CustomerPass1",
                 },
             )
-            self.assertEqual(logged_in.headers["Location"], "/customer/dashboard")
+            self.assertEqual(first_login.headers["Location"], "/customer/first-login-verify")
+            with self.client.session_transaction() as session_data:
+                self.assertNotIn("customer_id", session_data)
+
+            completed = self.client.post(
+                "/customer/first-login-verify",
+                data={
+                    "email": "customer@example.com",
+                    "verification_code": "123456",
+                    "action": "verify",
+                },
+            )
+            self.assertEqual(completed.headers["Location"], "/customer/dashboard")
+            account = self.customer_accounts.get_by_email("customer@example.com")
+            self.assertTrue(account.first_login_verified)
+            with self.client.session_transaction() as session_data:
+                self.assertEqual(session_data.get("customer_id"), account.id)
+
+            # Subsequent logins skip first-login OTP.
+            self.client.post("/customer/logout")
+            again = self.client.post(
+                "/customer/login",
+                data={
+                    "email": "customer@example.com",
+                    "password": "CustomerPass1",
+                },
+            )
+            self.assertEqual(again.headers["Location"], "/customer/dashboard")
         finally:
             app_module.generate_verification_code = previous_generate
 
@@ -1084,12 +1275,13 @@ class ApplicationTests(unittest.TestCase):
                 data={
                     "full_name": "Aqua Customer",
                     "email": "customer@example.com",
-                    "password": "customer-password-1",
-                    "confirm_password": "customer-password-1",
+                    "password": "CustomerPass1",
+                    "confirm_password": "CustomerPass1",
                 },
             )
-            account = self.customer_accounts.get_by_email("customer@example.com")
-            self.assertIsNotNone(account)
+            pending = self.pending_registrations.get_by_email("customer@example.com")
+            self.assertIsNotNone(pending)
+            self.assertIsNone(self.customer_accounts.get_by_email("customer@example.com"))
 
             blocked_resend = self.client.post(
                 "/customer/verify",
@@ -1120,10 +1312,10 @@ class ApplicationTests(unittest.TestCase):
                 follow_redirects=True,
             )
             self.assertIn(b"Too many incorrect attempts", locked.data)
-            account = self.customer_accounts.get_by_email("customer@example.com")
-            self.assertFalse(account.email_verified)
+            self.assertIsNone(self.customer_accounts.get_by_email("customer@example.com"))
 
-            account.verification_last_sent_at = None
+            pending = self.pending_registrations.get_by_email("customer@example.com")
+            pending.last_sent_at = None
             resent = self.client.post(
                 "/customer/verify",
                 data={
@@ -1133,14 +1325,14 @@ class ApplicationTests(unittest.TestCase):
                 follow_redirects=True,
             )
             self.assertIn(b"verification code", resent.data.lower())
-            account = self.customer_accounts.get_by_email("customer@example.com")
-            self.assertEqual(account.verification_attempts, 0)
+            pending = self.pending_registrations.get_by_email("customer@example.com")
+            self.assertEqual(pending.attempts, 0)
         finally:
             app_module.generate_verification_code = previous_generate
 
     def test_customer_login_uses_customer_session_only(self):
         account = verified_customer(
-            "Aqua Customer", "customer@example.com", "customer-password-1"
+            "Aqua Customer", "customer@example.com", "CustomerPass1"
         )
         account.id = self.customer_accounts.create_account(account)
         with self.client.session_transaction() as session:
@@ -1150,7 +1342,7 @@ class ApplicationTests(unittest.TestCase):
             "/customer/login",
             data={
                 "email": account.email,
-                "password": "customer-password-1",
+                "password": "CustomerPass1",
             },
         )
 
@@ -1162,7 +1354,7 @@ class ApplicationTests(unittest.TestCase):
 
     def test_customer_dashboard_and_profile_update(self):
         account = verified_customer(
-            "Aqua Customer", "customer@example.com", "customer-password-1"
+            "Aqua Customer", "customer@example.com", "CustomerPass1"
         )
         account.id = self.customer_accounts.create_account(account)
         self.products.create(
@@ -1251,19 +1443,19 @@ class ApplicationTests(unittest.TestCase):
             data={
                 "full_name": "Updated Customer",
                 "email": "updated-customer@example.com",
-                "current_password": "customer-password-1",
-                "new_password": "customer-password-2",
-                "confirm_password": "customer-password-2",
+                "current_password": "CustomerPass1",
+                "new_password": "CustomerPass2",
+                "confirm_password": "CustomerPass2",
             },
         )
         self.assertEqual(updated.status_code, 302)
         refreshed = self.customer_accounts.get_by_id(account.id)
         self.assertEqual(refreshed.full_name, "Updated Customer")
         self.assertEqual(refreshed.email, "updated-customer@example.com")
-        self.assertTrue(refreshed.verify_password("customer-password-2"))
+        self.assertTrue(refreshed.verify_password("CustomerPass2"))
 
     def test_staff_profile_update(self):
-        user = verified_user("Aqua Staff", "staff@example.com", "long-password-1")
+        user = verified_user("Aqua Staff", "staff@example.com", "LongPass123")
         user.id = self.users.create_account(user)
         with self.client.session_transaction() as session:
             session["user_id"] = user.id
@@ -1277,7 +1469,7 @@ class ApplicationTests(unittest.TestCase):
             data={
                 "full_name": "Updated Staff",
                 "email": "updated-staff@example.com",
-                "current_password": "long-password-1",
+                "current_password": "LongPass123",
                 "new_password": "",
                 "confirm_password": "",
             },
@@ -1286,11 +1478,11 @@ class ApplicationTests(unittest.TestCase):
         refreshed = self.users.get_by_id(user.id)
         self.assertEqual(refreshed.full_name, "Updated Staff")
         self.assertEqual(refreshed.email, "updated-staff@example.com")
-        self.assertTrue(refreshed.verify_password("long-password-1"))
+        self.assertTrue(refreshed.verify_password("LongPass123"))
 
     def test_customer_catalog_adds_product_and_renders_cart_page(self):
         account = verified_customer(
-            "Aqua Customer", "customer@example.com", "customer-password-1"
+            "Aqua Customer", "customer@example.com", "CustomerPass1"
         )
         account.id = self.customer_accounts.create_account(account)
         product = Product(
@@ -1317,7 +1509,7 @@ class ApplicationTests(unittest.TestCase):
 
     def test_customer_product_detail_and_add_to_order(self):
         account = verified_customer(
-            "Aqua Customer", "customer@example.com", "customer-password-1"
+            "Aqua Customer", "customer@example.com", "CustomerPass1"
         )
         account.id = self.customer_accounts.create_account(account)
         product_id = self.products.create(
@@ -1358,7 +1550,7 @@ class ApplicationTests(unittest.TestCase):
 
     def test_customer_checkout_creates_order_and_demo_payment_is_explicit(self):
         account = verified_customer(
-            "Aqua Customer", "customer@example.com", "customer-password-1"
+            "Aqua Customer", "customer@example.com", "CustomerPass1"
         )
         account.id = self.customer_accounts.create_account(account)
         product = Product(
@@ -1417,11 +1609,11 @@ class ApplicationTests(unittest.TestCase):
 
     def test_customer_cannot_view_another_customer_order(self):
         first = verified_customer(
-            "First Customer", "first@example.com", "customer-password-1"
+            "First Customer", "first@example.com", "CustomerPass1"
         )
         first.id = self.customer_accounts.create_account(first)
         second = verified_customer(
-            "Second Customer", "second@example.com", "customer-password-2"
+            "Second Customer", "second@example.com", "CustomerPass2"
         )
         second.id = self.customer_accounts.create_account(second)
         order = CustomerOrder(
@@ -1443,7 +1635,7 @@ class ApplicationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 404)
 
     def test_staff_workspace_pages_render(self):
-        user = verified_user("Aqua Staff", "staff@example.com", "long-password-1")
+        user = verified_user("Aqua Staff", "staff@example.com", "LongPass123")
         user.id = self.users.create_account(user)
         with self.client.session_transaction() as session:
             session["user_id"] = user.id
@@ -1489,7 +1681,7 @@ class ApplicationTests(unittest.TestCase):
         self.assertIn(b"could not be verified", response.data)
 
     def test_dashboard_includes_inventory_shortcuts(self):
-        user = verified_user("Staff", "staff-dash@example.com", "staff-password-1")
+        user = verified_user("Staff", "staff-dash@example.com", "StaffPass123")
         user.id = self.users.create_account(user)
         with self.client.session_transaction() as session:
             session["user_id"] = user.id

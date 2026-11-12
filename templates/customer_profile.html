@@ -66,9 +66,10 @@
                     id="new-password"
                     name="new_password"
                     type="password"
-                    minlength="10"
+                    minlength="8"
                     maxlength="128"
                     autocomplete="new-password">
+                {% include "_password_strength.html" %}
             </div>
 
             <div class="form-field profile-field">
@@ -77,7 +78,7 @@
                     id="confirm-password"
                     name="confirm_password"
                     type="password"
-                    minlength="10"
+                    minlength="8"
                     maxlength="128"
                     autocomplete="new-password">
             </div>

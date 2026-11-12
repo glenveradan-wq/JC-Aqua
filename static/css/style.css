@@ -846,6 +846,205 @@ body.auth-login .auth-brand img {
     margin-top: 1rem;
 }
 
+.otp-email-target {
+    color: #0f4a52;
+    word-break: break-word;
+}
+
+.otp-digit-row {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: .55rem;
+}
+
+.otp-digit {
+    width: 100%;
+    min-height: 3rem;
+    border: 1px solid #c9d8dc;
+    border-radius: 12px;
+    background: #fff;
+    color: #0f4a52;
+    font-size: 1.25rem;
+    font-weight: 700;
+    text-align: center;
+    letter-spacing: 0;
+}
+
+.otp-digit:focus {
+    outline: 2px solid #0f4a52;
+    outline-offset: 1px;
+    border-color: #0f4a52;
+}
+
+.otp-timer {
+    margin: .75rem 0 0;
+    color: var(--color-muted);
+    font-size: .85rem;
+}
+
+.otp-resend-countdown {
+    margin: 0 0 .65rem;
+    color: #6a8086;
+    font-size: .85rem;
+    text-align: center;
+}
+
+.otp-loading {
+    display: inline-block;
+}
+
+.password-strength {
+    margin-top: .7rem;
+}
+
+.password-strength-track {
+    height: .45rem;
+    border-radius: 999px;
+    background: #e4ecee;
+    overflow: hidden;
+}
+
+.password-strength-fill {
+    display: block;
+    height: 100%;
+    width: 0;
+    border-radius: inherit;
+    transition: width .2s ease, background-color .2s ease;
+    background: #c4554a;
+}
+
+.password-strength[data-level="poor"] .password-strength-fill {
+    background: #c4554a;
+}
+
+.password-strength[data-level="medium"] .password-strength-fill {
+    background: #d4a017;
+}
+
+.password-strength[data-level="hard"] .password-strength-fill {
+    background: #2f8f5b;
+}
+
+.password-strength-label {
+    margin: .45rem 0 .35rem;
+    color: #4f6870;
+    font-size: .82rem;
+}
+
+.password-strength[data-level="poor"] .password-strength-label strong {
+    color: #c4554a;
+}
+
+.password-strength[data-level="medium"] .password-strength-label strong {
+    color: #b8860b;
+}
+
+.password-strength[data-level="hard"] .password-strength-label strong {
+    color: #2f8f5b;
+}
+
+.password-strength-rules {
+    margin: 0;
+    padding-left: 1.1rem;
+    color: #6a8086;
+    font-size: .78rem;
+    line-height: 1.45;
+}
+
+.password-strength-rules li.is-met {
+    color: #2f8f5b;
+    font-weight: 650;
+}
+
+.app-modal {
+    border: none;
+    padding: 0;
+    background: transparent;
+    max-width: calc(100vw - 2rem);
+}
+
+.app-modal::backdrop {
+    background: rgba(15, 40, 46, .48);
+}
+
+.app-modal-card {
+    width: min(420px, 100%);
+    margin: auto;
+    padding: 1.35rem 1.4rem 1.25rem;
+    border: 1px solid #d8e4e8;
+    border-radius: 18px;
+    background: #fff;
+    box-shadow: 0 18px 50px rgba(15, 40, 46, .18);
+    animation: app-modal-in .18s ease-out;
+}
+
+.app-modal-kicker {
+    margin: 0 0 .35rem;
+    color: #6a8086;
+    font-size: .75rem;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+}
+
+.app-modal-title {
+    margin: 0 0 .55rem;
+    color: #0f4a52;
+    font-size: 1.25rem;
+}
+
+.app-modal-copy {
+    margin: 0;
+    color: #4f6870;
+    font-size: .95rem;
+    line-height: 1.55;
+}
+
+.app-modal-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .65rem;
+    justify-content: flex-end;
+    margin-top: 1.15rem;
+}
+
+.app-modal-actions .button,
+.app-modal-actions form {
+    margin: 0;
+}
+
+@keyframes app-modal-in {
+    from {
+        opacity: 0;
+        transform: translateY(8px) scale(.98);
+    }
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+@media (max-width: 480px) {
+    .otp-digit-row {
+        gap: .4rem;
+    }
+
+    .otp-digit {
+        min-height: 2.7rem;
+        font-size: 1.1rem;
+    }
+
+    .app-modal-actions {
+        flex-direction: column-reverse;
+    }
+
+    .app-modal-actions .button,
+    .app-modal-actions form,
+    .app-modal-actions form .button {
+        width: 100%;
+    }
+}
+
 /* ---------- Forms ---------- */
 
 .form-field {

@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
-    <link href="{{ url_for('static', filename='css/style.css', v=9) }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css', v=11) }}" rel="stylesheet">
 </head>
 
 <body class="site-page auth-background auth-register">
@@ -65,11 +65,12 @@
                         id="password"
                         name="password"
                         type="password"
-                        minlength="10"
+                        minlength="8"
                         maxlength="128"
                         autocomplete="new-password"
                         placeholder="Create a password"
                         required>
+                    {% include "_password_strength.html" %}
                 </div>
 
                 <div class="form-field">
@@ -78,7 +79,7 @@
                         id="confirm-password"
                         name="confirm_password"
                         type="password"
-                        minlength="10"
+                        minlength="8"
                         maxlength="128"
                         autocomplete="new-password"
                         placeholder="Re-enter your password"
@@ -106,6 +107,7 @@
         </section>
     </main>
     <script src="{{ url_for('static', filename='js/navigation.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='js/session_guard.js') }}" defer></script>
     <script src="{{ url_for('static', filename='js/form_validation.js') }}" defer></script>
 </body>
 </html>

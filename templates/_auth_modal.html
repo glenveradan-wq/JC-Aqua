@@ -1,0 +1,17 @@
+<dialog class="app-modal" id="{{ modal_id }}" data-app-modal {% if open %}open{% endif %}>
+    <form method="dialog" class="app-modal-card">
+        <p class="app-modal-kicker">{{ kicker or "JC Aqua Fish Shop" }}</p>
+        <h2 class="app-modal-title">{{ title }}</h2>
+        <p class="app-modal-copy">{{ message }}</p>
+        <div class="app-modal-actions">
+            {% if confirm_form %}
+            <button class="button button-secondary" value="cancel" type="submit">{{ cancel_label or "Cancel" }}</button>
+            {% else %}
+            <button class="button" value="ok" type="submit">{{ confirm_label or "Continue" }}</button>
+            {% endif %}
+        </div>
+    </form>
+    {% if confirm_form %}
+    {{ confirm_form|safe }}
+    {% endif %}
+</dialog>

@@ -7,7 +7,9 @@ from models import (
     Category,
     CustomerAccount,
     CustomerOrder,
+    EmailVerificationCode,
     OrderItem,
+    PendingRegistration,
     Product,
     Rider,
     StockMovement,
@@ -21,7 +23,10 @@ _ACCOUNT_SELECT_COLUMNS = (
     "verification_attempts, verification_last_sent_at"
 )
 _CUSTOMER_SELECT_COLUMNS = (
-    f"{_ACCOUNT_SELECT_COLUMNS}, firebase_uid"
+    "id, full_name, email, password_hash, email_verified, "
+    "email_verified_at, first_login_verified, first_login_verified_at, "
+    "verification_code_hash, verification_expires_at, "
+    "verification_attempts, verification_last_sent_at, firebase_uid"
 )
 
 
@@ -237,15 +242,19 @@ class CustomerAccountRepository:
                 """
                 INSERT INTO customer_accounts (
                     full_name, email, password_hash, email_verified,
+                    email_verified_at, first_login_verified, first_login_verified_at,
                     verification_code_hash, verification_expires_at, firebase_uid
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     customer.full_name,
                     customer.email,
                     customer.password_hash,
                     bool(customer.email_verified),
+                    customer.email_verified_at,
+                    bool(customer.first_login_verified),
+                    customer.first_login_verified_at,
                     customer.verification_code_hash,
                     customer.verification_expires_at,
                     customer.firebase_uid,
@@ -254,6 +263,41 @@ class CustomerAccountRepository:
             customer_id = cursor.lastrowid
             connection.commit()
             return customer_id
+        finally:
+            connection.close()
+
+    def create_verified_from_pending(
+        self,
+        full_name: str,
+        email: str,
+        password_hash: str,
+        verified_at,
+    ) -> int:
+        """Create a permanent customer after registration OTP success (transactional)."""
+        connection = get_connection()
+        try:
+            cursor = connection.cursor()
+            connection.start_transaction()
+            cursor.execute(
+                """
+                INSERT INTO customer_accounts (
+                    full_name, email, password_hash, email_verified,
+                    email_verified_at, first_login_verified, first_login_verified_at
+                )
+                VALUES (%s, %s, %s, TRUE, %s, FALSE, NULL)
+                """,
+                (full_name, email, password_hash, verified_at),
+            )
+            customer_id = cursor.lastrowid
+            cursor.execute(
+                "DELETE FROM pending_registrations WHERE email = %s",
+                (email,),
+            )
+            connection.commit()
+            return customer_id
+        except Exception:
+            connection.rollback()
+            raise
         finally:
             connection.close()
 
@@ -386,10 +430,28 @@ class CustomerAccountRepository:
                 """
                 UPDATE customer_accounts
                 SET email_verified = TRUE,
+                    email_verified_at = COALESCE(email_verified_at, UTC_TIMESTAMP()),
                     verification_code_hash = NULL,
                     verification_expires_at = NULL,
                     verification_attempts = 0,
                     verification_last_sent_at = NULL
+                WHERE id = %s
+                """,
+                (customer_id,),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+    def mark_first_login_verified(self, customer_id: int) -> None:
+        connection = get_connection()
+        try:
+            cursor = connection.cursor()
+            cursor.execute(
+                """
+                UPDATE customer_accounts
+                SET first_login_verified = TRUE,
+                    first_login_verified_at = UTC_TIMESTAMP()
                 WHERE id = %s
                 """,
                 (customer_id,),
@@ -426,6 +488,259 @@ class CustomerAccountRepository:
                     """,
                     (full_name, email, password_hash, customer_id),
                 )
+            connection.commit()
+        finally:
+            connection.close()
+
+
+class PendingRegistrationRepository:
+    def get_by_email(self, email: str) -> PendingRegistration | None:
+        connection = get_connection()
+        try:
+            cursor = connection.cursor(dictionary=True)
+            cursor.execute(
+                """
+                SELECT id, full_name, email, password_hash, otp_hash,
+                       otp_expires_at, attempts, last_sent_at, created_at
+                FROM pending_registrations
+                WHERE email = %s
+                """,
+                (email,),
+            )
+            row = cursor.fetchone()
+            return PendingRegistration.from_row(row) if row else None
+        finally:
+            connection.close()
+
+    def upsert(
+        self,
+        full_name: str,
+        email: str,
+        password_hash: str,
+        otp_hash: str,
+        otp_expires_at,
+        last_sent_at,
+    ) -> int:
+        connection = get_connection()
+        try:
+            cursor = connection.cursor()
+            cursor.execute(
+                """
+                INSERT INTO pending_registrations (
+                    full_name, email, password_hash, otp_hash,
+                    otp_expires_at, attempts, last_sent_at
+                )
+                VALUES (%s, %s, %s, %s, %s, 0, %s)
+                ON DUPLICATE KEY UPDATE
+                    full_name = VALUES(full_name),
+                    password_hash = VALUES(password_hash),
+                    otp_hash = VALUES(otp_hash),
+                    otp_expires_at = VALUES(otp_expires_at),
+                    attempts = 0,
+                    last_sent_at = VALUES(last_sent_at)
+                """,
+                (
+                    full_name,
+                    email,
+                    password_hash,
+                    otp_hash,
+                    otp_expires_at,
+                    last_sent_at,
+                ),
+            )
+            pending_id = cursor.lastrowid
+            if not pending_id:
+                cursor.execute(
+                    "SELECT id FROM pending_registrations WHERE email = %s",
+                    (email,),
+                )
+                row = cursor.fetchone()
+                pending_id = int(row[0]) if row else 0
+            connection.commit()
+            return pending_id
+        finally:
+            connection.close()
+
+    def set_otp(
+        self,
+        email: str,
+        otp_hash: str,
+        otp_expires_at,
+        last_sent_at,
+    ) -> None:
+        connection = get_connection()
+        try:
+            cursor = connection.cursor()
+            cursor.execute(
+                """
+                UPDATE pending_registrations
+                SET otp_hash = %s,
+                    otp_expires_at = %s,
+                    attempts = 0,
+                    last_sent_at = %s
+                WHERE email = %s
+                """,
+                (otp_hash, otp_expires_at, last_sent_at, email),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+    def increment_attempts(self, email: str) -> int:
+        connection = get_connection()
+        try:
+            cursor = connection.cursor()
+            cursor.execute(
+                """
+                UPDATE pending_registrations
+                SET attempts = attempts + 1
+                WHERE email = %s
+                """,
+                (email,),
+            )
+            cursor.execute(
+                "SELECT attempts FROM pending_registrations WHERE email = %s",
+                (email,),
+            )
+            row = cursor.fetchone()
+            connection.commit()
+            return int(row[0]) if row else 0
+        finally:
+            connection.close()
+
+    def delete_by_email(self, email: str) -> None:
+        connection = get_connection()
+        try:
+            cursor = connection.cursor()
+            cursor.execute(
+                "DELETE FROM pending_registrations WHERE email = %s",
+                (email,),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+
+class EmailVerificationCodeRepository:
+    def invalidate_active(self, email: str, verification_type: str) -> None:
+        connection = get_connection()
+        try:
+            cursor = connection.cursor()
+            cursor.execute(
+                """
+                UPDATE email_verification_codes
+                SET is_used = TRUE
+                WHERE email = %s
+                  AND verification_type = %s
+                  AND is_used = FALSE
+                """,
+                (email, verification_type),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+    def create_code(
+        self,
+        email: str,
+        otp_hash: str,
+        verification_type: str,
+        expires_at,
+        customer_id: int | None = None,
+    ) -> int:
+        connection = get_connection()
+        try:
+            cursor = connection.cursor()
+            connection.start_transaction()
+            cursor.execute(
+                """
+                UPDATE email_verification_codes
+                SET is_used = TRUE
+                WHERE email = %s
+                  AND verification_type = %s
+                  AND is_used = FALSE
+                """,
+                (email, verification_type),
+            )
+            cursor.execute(
+                """
+                INSERT INTO email_verification_codes (
+                    customer_id, email, otp_hash, verification_type, expires_at
+                )
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (customer_id, email, otp_hash, verification_type, expires_at),
+            )
+            code_id = cursor.lastrowid
+            connection.commit()
+            return code_id
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def get_active(
+        self,
+        email: str,
+        verification_type: str,
+    ) -> EmailVerificationCode | None:
+        connection = get_connection()
+        try:
+            cursor = connection.cursor(dictionary=True)
+            cursor.execute(
+                """
+                SELECT id, customer_id, email, otp_hash, verification_type,
+                       expires_at, attempts, is_used, created_at, verified_at
+                FROM email_verification_codes
+                WHERE email = %s
+                  AND verification_type = %s
+                  AND is_used = FALSE
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (email, verification_type),
+            )
+            row = cursor.fetchone()
+            return EmailVerificationCode.from_row(row) if row else None
+        finally:
+            connection.close()
+
+    def increment_attempts(self, code_id: int) -> int:
+        connection = get_connection()
+        try:
+            cursor = connection.cursor()
+            cursor.execute(
+                """
+                UPDATE email_verification_codes
+                SET attempts = attempts + 1
+                WHERE id = %s
+                """,
+                (code_id,),
+            )
+            cursor.execute(
+                "SELECT attempts FROM email_verification_codes WHERE id = %s",
+                (code_id,),
+            )
+            row = cursor.fetchone()
+            connection.commit()
+            return int(row[0]) if row else 0
+        finally:
+            connection.close()
+
+    def mark_used(self, code_id: int) -> None:
+        connection = get_connection()
+        try:
+            cursor = connection.cursor()
+            cursor.execute(
+                """
+                UPDATE email_verification_codes
+                SET is_used = TRUE,
+                    verified_at = UTC_TIMESTAMP()
+                WHERE id = %s
+                """,
+                (code_id,),
+            )
             connection.commit()
         finally:
             connection.close()

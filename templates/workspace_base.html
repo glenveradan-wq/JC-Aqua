@@ -54,6 +54,7 @@
         {% block content %}{% endblock %}
     </main>
     <script src="{{ url_for('static', filename='js/navigation.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='js/session_guard.js') }}" defer></script>
     <script src="{{ url_for('static', filename='js/form_validation.js') }}" defer></script>
     {% block scripts %}{% endblock %}
 </body>
