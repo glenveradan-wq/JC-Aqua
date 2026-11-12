@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
+os.environ.setdefault("MYSQL_CONNECTOR_PYTHON_IMPL", "pure")
+
 import mysql.connector
 
 
