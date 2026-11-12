@@ -1,0 +1,141 @@
+{% extends "workspace_base.html" %}
+
+{% block title %}{% if editing %}Edit order{% else %}New order{% endif %}{% endblock %}
+{% block main_class %}form-workspace{% endblock %}
+{% block head %}
+    <script src="{{ url_for('static', filename='js/order_form.js') }}" defer></script>
+{% endblock %}
+
+{% block content %}
+    <div class="order-form-content">
+        <a class="button button-secondary button-small back-link" href="{{ url_for('order_list') }}">← <span>Back to orders</span></a>
+
+        <section class="page-heading form-page-heading">
+            <div>
+                <p class="eyebrow">Order management</p>
+                <h1>{% if editing %}Edit order #{{ order_id }}{% else %}Create a new order{% endif %}</h1>
+                <p>Enter the customer details and add one or more items to this order.</p>
+            </div>
+        </section>
+
+        {% include "_flashes.html" %}
+
+        <form
+            class="workspace-card order-form"
+            method="post"
+            action="{% if editing %}{{ url_for('edit_order', order_id=order_id) }}{% else %}{{ url_for('new_order') }}{% endif %}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <fieldset>
+                <legend>
+                    <span class="form-step">1</span>
+                    Customer information
+                </legend>
+                <div class="form-grid">
+                    <div class="form-field">
+                        <label for="customer-name">Customer name</label>
+                        <input id="customer-name" name="customer_name" type="text" minlength="2" maxlength="120" value="{{ form_data.customer_name }}" autocomplete="name" required>
+                    </div>
+                    <div class="form-field">
+                        <label for="customer-contact">Contact number</label>
+                        <input id="customer-contact" name="customer_contact" type="tel" minlength="7" maxlength="40" value="{{ form_data.customer_contact }}" autocomplete="tel" required>
+                    </div>
+                    <div class="form-field form-field-wide delivery-address-field">
+                        <label for="delivery-address">Delivery address <span class="required-mark" aria-hidden="true">*</span></label>
+                        <p id="delivery-address-hint" class="field-hint">Include the street, barangay, city, and a nearby landmark.</p>
+                        <textarea id="delivery-address" name="delivery_address" rows="4" minlength="5" maxlength="500" placeholder="House or building no., street, barangay, city, landmark..." aria-describedby="delivery-address-hint" required>{{ form_data.delivery_address }}</textarea>
+                    </div>
+                </div>
+            </fieldset>
+
+            {% if customer_order %}
+                <div class="form-notice">
+                    Items are managed by the customer checkout and cannot be changed here. Cancelling the order releases its reserved stock.
+                </div>
+            {% else %}
+                <fieldset>
+                    <legend>
+                        <span class="form-step">2</span>
+                        Order items
+                    </legend>
+                    <div class="items-heading" aria-hidden="true">
+                        <span>Product or fish</span>
+                        <span>Quantity</span>
+                        <span>Unit price (₱)</span>
+                        <span></span>
+                    </div>
+                    <div class="order-item-list" data-item-list>
+                        {% for item in form_data["items"] %}
+                            <div class="order-item-row" data-item-row>
+                                <div class="form-field">
+                                    <label class="item-mobile-label" for="item-name-{{ loop.index }}">Product or fish</label>
+                                    <input id="item-name-{{ loop.index }}" name="item_name" type="text" maxlength="160" value="{{ item.product_name }}" required>
+                                </div>
+                                <div class="form-field">
+                                    <label class="item-mobile-label" for="item-quantity-{{ loop.index }}">Quantity</label>
+                                    <input id="item-quantity-{{ loop.index }}" name="quantity" type="number" min="1" max="100000" value="{{ item.quantity }}" required>
+                                </div>
+                                <div class="form-field">
+                                    <label class="item-mobile-label" for="item-price-{{ loop.index }}">Unit price (₱)</label>
+                                    <input id="item-price-{{ loop.index }}" name="unit_price" type="number" min="0" max="99999999.99" step="0.01" value="{{ item.unit_price }}" required>
+                                </div>
+                                <button class="button button-danger button-small item-remove-button" type="button" data-remove-item aria-label="Remove item" {% if loop.length == 1 %}disabled{% endif %}>Remove</button>
+                            </div>
+                        {% endfor %}
+                    </div>
+                    <div class="items-footer">
+                        <button class="button button-secondary button-small" type="button" data-add-item>＋ Add another item</button>
+                        <p class="order-total-preview">Estimated total <strong>₱<span data-order-total>0.00</span></strong></p>
+                    </div>
+                </fieldset>
+            {% endif %}
+
+            <fieldset class="delivery-fieldset">
+                <legend>
+                    <span class="form-step">3</span>
+                    Order status and delivery
+                </legend>
+                <div class="form-grid status-grid">
+                    <div class="form-field">
+                        <label for="order-status">Status</label>
+                        <select id="order-status" name="status" required>
+                            {% for status in statuses %}
+                                <option value="{{ status }}" {% if form_data.status == status %}selected{% endif %}>{{ status|replace('-', ' ')|title }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="delivery-preview">
+                        <span class="delivery-symbol" aria-hidden="true">↗</span>
+                        <div>
+                            <strong>Nearby delivery</strong>
+                            <p>Orders can be fulfilled by meet-up at the shop or by local delivery only within approved nearby service areas.</p>
+                        </div>
+                    </div>
+                </div>
+            </fieldset>
+
+            <div class="form-actions">
+                <a class="button button-secondary" href="{{ url_for('order_list') }}">Cancel</a>
+                <button class="button" type="submit">{% if editing %}Save changes{% else %}Save order{% endif %}</button>
+            </div>
+        </form>
+    {% if not customer_order %}
+    <template data-item-template>
+        <div class="order-item-row" data-item-row>
+            <div class="form-field">
+                <label class="item-mobile-label">Product or fish</label>
+                <input name="item_name" type="text" maxlength="160" required>
+            </div>
+            <div class="form-field">
+                <label class="item-mobile-label">Quantity</label>
+                <input name="quantity" type="number" min="1" max="100000" value="1" required>
+            </div>
+            <div class="form-field">
+                <label class="item-mobile-label">Unit price (₱)</label>
+                <input name="unit_price" type="number" min="0" max="99999999.99" step="0.01" value="0.00" required>
+            </div>
+            <button class="button button-danger button-small item-remove-button" type="button" data-remove-item aria-label="Remove item">Remove</button>
+        </div>
+    </template>
+    {% endif %}
+    </div>
+{% endblock %}

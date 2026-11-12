@@ -1,0 +1,62 @@
+{% extends "customer_base.html" %}
+{% block title %}Your cart{% endblock %}
+{% block body_class %}customer-fish-page{% endblock %}
+{% block head %}
+    <link href="{{ url_for('static', filename='css/customer-fish.css', v=4) }}" rel="stylesheet">
+{% endblock %}
+{% block content %}
+    <section class="page-heading">
+        <div>
+            <p class="eyebrow">Cart</p>
+            <h1>Your cart</h1>
+            <p>Review your items before checkout.</p>
+        </div>
+        <a class="button button-secondary" href="{{ url_for('customer_dashboard') }}">Continue shopping</a>
+    </section>
+    {% if cart_items %}
+        <section class="workspace-card customer-card">
+            <div class="customer-cart-list">
+                {% for row in cart_items %}
+                    {% set unit = row.product.unit or 'pieces' %}
+                    <article class="customer-cart-row fish-cart-row">
+                        <div class="fish-cart-media">
+                            {% if row.product.image_path %}
+                                <img src="{{ url_for('static', filename=row.product.image_path) }}" alt="" width="72" height="72">
+                            {% else %}
+                                <img src="{{ url_for('static', filename='images/product-placeholder.svg') }}" alt="" width="72" height="72">
+                            {% endif %}
+                        </div>
+                        <div>
+                            <h2>{{ row.product.name }}</h2>
+                            <p>₱{{ "%.2f"|format(row.product.unit_price) }}/{{ unit }} · Ready to order: {{ row.product.stock_quantity }} {{ unit }}</p>
+                        </div>
+                        <form class="customer-cart-update" method="post" action="{{ url_for('customer_cart_view') }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="product_id" value="{{ row.product.id }}">
+                            <label for="quantity-{{ row.product.id }}">Qty ({{ unit }})</label>
+                            <input id="quantity-{{ row.product.id }}" name="quantity" type="number" min="0" max="{{ [row.product.stock_quantity, 100]|min }}" value="{{ row.quantity }}" required>
+                            <button class="button button-secondary button-small" type="submit">Update</button>
+                        </form>
+                        <form method="post" action="{{ url_for('customer_cart_view') }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="product_id" value="{{ row.product.id }}">
+                            <input type="hidden" name="quantity" value="0">
+                            <button class="button button-secondary button-small" type="submit">Remove</button>
+                        </form>
+                        <strong class="customer-line-total">₱{{ "%.2f"|format(row.line_total) }}</strong>
+                    </article>
+                {% endfor %}
+            </div>
+            <div class="customer-cart-summary">
+                <strong>Total <span>₱{{ "%.2f"|format(total) }}</span></strong>
+                <a class="button" href="{{ url_for('customer_checkout') }}">Proceed to checkout</a>
+            </div>
+        </section>
+    {% else %}
+        <section class="workspace-card"><div class="empty-state">
+            <h2>Your cart is empty</h2>
+            <p>Browse the shop and add items when you’re ready to order.</p>
+            <a class="button" href="{{ url_for('customer_dashboard') }}">Browse shop</a>
+        </div></section>
+    {% endif %}
+{% endblock %}

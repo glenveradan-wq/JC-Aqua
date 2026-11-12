@@ -1,0 +1,28 @@
+{% extends "workspace_base.html" %}
+{% block title %}Edit category{% endblock %}
+{% block content %}
+    <a class="button button-secondary button-small back-link" href="{{ url_for('inventory.inventory_home', panel='categories') }}">← Inventory categories</a>
+    <section class="page-heading">
+        <div>
+            <p class="eyebrow">Inventory</p>
+            <h1>Edit category</h1>
+            <p>Category labels stay available when adding or editing fish products.</p>
+        </div>
+    </section>
+    {% include "_flashes.html" %}
+    <form class="workspace-card product-form" method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="form-field">
+            <label for="name">Name</label>
+            <input id="name" name="name" type="text" maxlength="80" value="{{ category.name }}" required>
+        </div>
+        <div class="form-field">
+            <label for="sort_order">Sort order</label>
+            <input id="sort_order" name="sort_order" type="number" value="{{ category.sort_order }}">
+        </div>
+        <div class="form-actions">
+            <a class="button button-secondary" href="{{ url_for('inventory.inventory_home', panel='categories') }}">Cancel</a>
+            <button class="button" type="submit">Save</button>
+        </div>
+    </form>
+{% endblock %}

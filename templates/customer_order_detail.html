@@ -1,0 +1,64 @@
+{% extends "customer_base.html" %}
+{% block title %}Order #{{ order.id }}{% endblock %}
+{% block content %}
+    <section class="page-heading">
+        <div>
+            <p class="eyebrow">Order details</p>
+            <h1>Order #{{ order.id }}</h1>
+            <p>Placed {{ order.created_at.strftime("%b %d, %Y") }}</p>
+        </div>
+        <span class="status-pill status-{{ order.status }}">{{ order.status|replace('-', ' ')|title }}</span>
+    </section>
+    <div class="customer-checkout-grid">
+        <section class="workspace-card customer-card">
+            <h2>Items</h2>
+            <div class="customer-cart-list">
+                {% for item in order.items %}
+                    <article class="customer-cart-row">
+                        <div><h2>{{ item.product_name }}</h2><p>{{ item.quantity }} kg × ₱{{ "%.2f"|format(item.unit_price) }}/kg</p></div>
+                        <strong class="customer-line-total">₱{{ "%.2f"|format(item.line_total) }}</strong>
+                    </article>
+                {% endfor %}
+            </div>
+            <div class="customer-summary-total"><strong>Item total</strong><strong>₱{{ "%.2f"|format(order.total - (order.delivery_fee if order.delivery_option == 'delivery' else 0)) }}</strong></div>
+            {% if order.delivery_option == 'delivery' %}
+                <div class="customer-summary-total"><strong>Delivery fee</strong><strong>₱{{ "%.2f"|format(order.delivery_fee) }}</strong></div>
+            {% endif %}
+            <div class="customer-summary-total"><strong>Total</strong><strong>₱{{ "%.2f"|format(order.total) }}</strong></div>
+        </section>
+        <aside class="workspace-card customer-card">
+            <h2>Customer details</h2>
+            <dl class="customer-order-contact">
+                <div>
+                    <dt>Address</dt>
+                    <dd>{{ order.delivery_address or "—" }}</dd>
+                </div>
+                <div>
+                    <dt>Name</dt>
+                    <dd>{{ order.customer_name }}</dd>
+                </div>
+                <div>
+                    <dt>Number</dt>
+                    <dd>{{ order.customer_contact }}</dd>
+                </div>
+            </dl>
+            <p><strong>Delivery option:</strong> {% if order.delivery_option == 'delivery' %}Home Delivery{% else %}Store Pickup{% endif %}</p>
+            {% if order.delivery_option == 'delivery' %}
+                <p><strong>Delivery status:</strong> {{ order.delivery_status|replace('-', ' ')|title }}</p>
+            {% else %}
+                <p><strong>Pickup:</strong> Available at the shop</p>
+            {% endif %}
+            <h2 class="customer-payment-heading">Payment</h2>
+            <p><strong>Method:</strong> {{ (order.payment_method or 'not set')|replace('_', ' ')|title }}</p>
+            <p><strong>Status:</strong> {{ order.payment_status|replace('-', ' ')|title }}</p>
+            {% if order.payment_reference %}
+                <p><strong>Reference:</strong> {{ order.payment_reference }}</p>
+            {% endif %}
+            {% if order.payment_status in ['awaiting-payment', 'pending-verification', 'demo-pending', 'cod-pending'] and order.status != 'cancelled' %}
+                <a class="button button-full" href="{{ url_for('customer_payment', order_id=order.id) }}">Open payment page</a>
+            {% endif %}
+            <p class="demo-payment-note">GCash and bank payments need staff verification. COD is confirmed on receipt.</p>
+        </aside>
+    </div>
+    <p class="customer-back-link"><a href="{{ url_for('customer_orders') }}">← Back to my orders</a></p>
+{% endblock %}

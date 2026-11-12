@@ -1,0 +1,376 @@
+{% extends "workspace_base.html" %}
+{% block title %}Inventory{% endblock %}
+{% block body_class %}inventory-page{% endblock %}
+{% block main_class %}inventory-workspace{% endblock %}
+{% block head %}
+    <link href="{{ url_for('static', filename='css/inventory.css', v=4) }}" rel="stylesheet">
+{% endblock %}
+
+{% block content %}
+    <section class="page-heading">
+        <div>
+            <p class="eyebrow">Inventory</p>
+            <h1>Product inventory</h1>
+            <p>Manage products across Fish Food, Aquarium, and Aquarium Accessories.</p>
+        </div>
+        <div class="inv-heading-actions">
+            <a class="button" href="{{ url_for('new_product') }}">＋ Add product</a>
+        </div>
+    </section>
+
+    {% include "_flashes.html" %}
+
+    <section class="inv-stats" aria-label="Inventory summary">
+        <article class="inv-stat"><span>Total products</span><strong>{{ summary.total_products }}</strong></article>
+        <article class="inv-stat"><span>Categories</span><strong>{{ summary.total_categories }}</strong></article>
+        <article class="inv-stat"><span>Units on hand</span><strong>{{ summary.total_stock }}</strong></article>
+        <article class="inv-stat inv-stat-warn"><span>Low stock</span><strong>{{ summary.low_stock }}</strong></article>
+        <article class="inv-stat inv-stat-danger"><span>Out of stock</span><strong>{{ summary.out_of_stock }}</strong></article>
+    </section>
+
+    <form class="inv-toolbar" method="get" action="{{ url_for('inventory.inventory_home') }}">
+        {% if active_category %}<input type="hidden" name="category" value="{{ active_category }}">{% endif %}
+        {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
+        {% if panel %}<input type="hidden" name="panel" value="{{ panel }}">{% endif %}
+        <label class="visually-hidden" for="inv-search">Search</label>
+        <input id="inv-search" name="q" type="search" value="{{ search }}" placeholder="Search name, SKU, category">
+        <label class="visually-hidden" for="inv-sort">Sort</label>
+        <select id="inv-sort" name="sort">
+            <option value="name" {% if sort == 'name' %}selected{% endif %}>Name</option>
+            <option value="sku" {% if sort == 'sku' %}selected{% endif %}>SKU</option>
+            <option value="price" {% if sort == 'price' %}selected{% endif %}>Price</option>
+            <option value="stock" {% if sort == 'stock' %}selected{% endif %}>Stock</option>
+        </select>
+        <button class="button button-secondary" type="submit">Apply</button>
+    </form>
+
+    <nav class="inv-chips" aria-label="Categories">
+        <a class="inv-chip{% if not active_category %} is-active{% endif %}" href="{{ url_for('inventory.inventory_home', q=search, sort=sort, status=status) }}">All</a>
+        {% for category in categories %}
+            <a class="inv-chip{% if active_category == category %} is-active{% endif %}" href="{{ url_for('inventory.inventory_home', category=category, q=search, sort=sort, status=status) }}">{{ category }}</a>
+        {% endfor %}
+        <a class="inv-chip{% if active_category == '__uncategorized__' %} is-active{% endif %}" href="{{ url_for('inventory.inventory_home', category='__uncategorized__', q=search, sort=sort, status=status) }}">Uncategorized</a>
+    </nav>
+
+    <nav class="inv-chips inv-chips-status" aria-label="Stock status">
+        <a class="inv-chip{% if not status %} is-active{% endif %}" href="{{ url_for('inventory.inventory_home', category=active_category, q=search, sort=sort) }}">Any status</a>
+        <a class="inv-chip{% if status == 'in' %} is-active{% endif %}" href="{{ url_for('inventory.inventory_home', category=active_category, q=search, sort=sort, status='in') }}">In stock</a>
+        <a class="inv-chip{% if status == 'low' %} is-active{% endif %}" href="{{ url_for('inventory.inventory_home', category=active_category, q=search, sort=sort, status='low') }}">Low stock</a>
+        <a class="inv-chip{% if status == 'out' %} is-active{% endif %}" href="{{ url_for('inventory.inventory_home', category=active_category, q=search, sort=sort, status='out') }}">Out of stock</a>
+    </nav>
+
+    {% if products %}
+        <section class="inv-grid" aria-label="Products">
+            {% for product in products %}
+                {% set status_key = inventory_stock_status(product.stock_quantity) %}
+                <a class="inv-card" href="{{ url_for('inventory.inventory_home', category=active_category, q=search, sort=sort, status=status, product=product.id) }}">
+                    <div class="inv-card-media">
+                        {% if product.image_path %}
+                            <img src="{{ url_for('static', filename=product.image_path) }}" alt="" loading="lazy">
+                        {% else %}
+                            <img src="{{ url_for('static', filename='images/product-placeholder.svg') }}" alt="" loading="lazy">
+                        {% endif %}
+                    </div>
+                    <div class="inv-card-body">
+                        <p class="inv-card-category">{{ product.category or "Uncategorized" }}</p>
+                        <h2>{{ product.name }}</h2>
+                        <p class="inv-card-sku">{{ product.sku or "No SKU" }} · {{ (product.unit or 'pieces')|title }}</p>
+                        <p class="inv-card-price">₱{{ "%.2f"|format(product.unit_price) }}/{{ product.unit or 'pieces' }}</p>
+                        <p class="inv-badge inv-badge-{{ status_key }}">
+                            {% if status_key == 'in' %}IN STOCK · {{ product.stock_quantity }} {{ product.unit or 'pieces' }}
+                            {% elif status_key == 'low' %}LOW STOCK · {{ product.stock_quantity }} {{ product.unit or 'pieces' }}
+                            {% else %}OUT OF STOCK{% endif %}
+                        </p>
+                        {% if product.available_for_sale %}<p class="inv-card-sku">For sale</p>{% else %}<p class="inv-card-sku">Staff only</p>{% endif %}
+                    </div>
+                </a>
+            {% endfor %}
+        </section>
+    {% else %}
+        <div class="empty-state">
+            <h2>No products match</h2>
+            <p>Try another category, status, or search term.</p>
+            <a class="button button-secondary" href="{{ url_for('inventory.inventory_home') }}">Reset filters</a>
+        </div>
+    {% endif %}
+
+    {% if selected_product %}
+        {% set status_key = inventory_stock_status(selected_product.stock_quantity) %}
+        {% set close_url = url_for('inventory.inventory_home', category=active_category, q=search, sort=sort, status=status) %}
+        {% set base_product_url = url_for('inventory.inventory_home', category=active_category, q=search, sort=sort, status=status, product=selected_product.id) %}
+        <div class="inv-modal-backdrop">
+            <section class="inv-modal{% if stock_action %} inv-modal-wide{% endif %}" role="dialog" aria-modal="true" aria-labelledby="inv-modal-title">
+                <a class="inv-modal-close" href="{{ close_url }}" aria-label="Close">×</a>
+                <div class="inv-modal-media">
+                    {% if selected_product.image_path %}
+                        <img src="{{ url_for('static', filename=selected_product.image_path) }}" alt="">
+                    {% else %}
+                        <img src="{{ url_for('static', filename='images/product-placeholder.svg') }}" alt="">
+                    {% endif %}
+                </div>
+                {% if stock_action %}
+                    {% set action_endpoint = {
+                        'in': url_for('inventory.stock_in'),
+                        'out': url_for('inventory.stock_out'),
+                        'adjust': url_for('inventory.stock_adjust')
+                    }[stock_action] %}
+                    {% set action_label = {
+                        'in': 'Add stock',
+                        'out': 'Deduct stock',
+                        'adjust': 'Adjust stock'
+                    }[stock_action] %}
+                    {% set submit_label = {
+                        'in': 'Submit Stock',
+                        'out': 'Submit Deduction',
+                        'adjust': 'Save Adjustment'
+                    }[stock_action] %}
+                {% endif %}
+                <div class="inv-modal-copy{% if stock_action %} inv-modal-copy-stock{% endif %}">
+                    <div class="inv-modal-header">
+                        <p class="inv-card-category">{{ selected_product.category or "Uncategorized" }}</p>
+                        <h2 id="inv-modal-title">{{ selected_product.name }}</h2>
+                        {% if not stock_action %}
+                            <p class="inv-card-sku">SKU: {{ selected_product.sku or "—" }} · {{ (selected_product.unit or 'pieces')|title }}</p>
+                            <p class="inv-card-price">₱{{ "%.2f"|format(selected_product.unit_price) }}/{{ selected_product.unit or 'pieces' }}</p>
+                        {% endif %}
+                        <p class="inv-badge inv-badge-{{ status_key }}">
+                            {% if status_key == 'in' %}IN STOCK · {{ selected_product.stock_quantity }} {{ selected_product.unit or 'pieces' }}
+                            {% elif status_key == 'low' %}LOW STOCK · {{ selected_product.stock_quantity }} {{ selected_product.unit or 'pieces' }}
+                            {% else %}OUT OF STOCK{% endif %}
+                        </p>
+                        {% if not stock_action %}
+                            <p class="inv-card-sku">{% if selected_product.available_for_sale %}Available for sale{% else %}Not listed in customer catalog{% endif %}</p>
+                        {% endif %}
+
+                        <div class="inv-modal-actions">
+                            {% if not stock_action %}
+                                <a class="button" href="{{ url_for('edit_product', product_id=selected_product.id) }}">Edit product</a>
+                            {% endif %}
+                            <a class="button button-secondary{% if stock_action == 'in' %} is-selected{% endif %}" href="{{ url_for('inventory.inventory_home', category=active_category, q=search, sort=sort, status=status, product=selected_product.id, stock='in') }}">Add stock</a>
+                            <a class="button button-secondary{% if stock_action == 'out' %} is-selected{% endif %}" href="{{ url_for('inventory.inventory_home', category=active_category, q=search, sort=sort, status=status, product=selected_product.id, stock='out') }}">Deduct stock</a>
+                            <a class="button button-secondary{% if stock_action == 'adjust' %} is-selected{% endif %}" href="{{ url_for('inventory.inventory_home', category=active_category, q=search, sort=sort, status=status, product=selected_product.id, stock='adjust') }}">Adjust stock</a>
+                            {% if not stock_action %}
+                                <form method="post" action="{{ url_for('delete_product', product_id=selected_product.id) }}" onsubmit="return confirm('Delete this product?');">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <button class="button button-danger" type="submit">Delete</button>
+                                </form>
+                            {% else %}
+                                <a class="button button-secondary" href="{{ base_product_url }}">Back to details</a>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <div class="inv-modal-scroll">
+                        {% if stock_action %}
+                            <form
+                                id="inv-stock-form"
+                                class="inv-stock-form"
+                                method="post"
+                                action="{{ action_endpoint }}"
+                                data-stock-action="{{ stock_action }}"
+                                data-current-stock="{{ selected_product.stock_quantity }}"
+                                novalidate
+                            >
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <input type="hidden" name="product_id" value="{{ selected_product.id }}">
+                                <h3>{{ action_label }}</h3>
+                                <p class="inv-stock-help">
+                                    {% if stock_action == 'in' %}
+                                        Record newly received inventory for this product.
+                                    {% elif stock_action == 'out' %}
+                                        Record stock removed from inventory. You cannot deduct more than the current stock.
+                                    {% else %}
+                                        Set the correct on-hand quantity after a physical count.
+                                    {% endif %}
+                                </p>
+                                <div class="inv-stock-meta">
+                                    <p><span>Product</span><strong>{{ selected_product.name }}</strong></p>
+                                    <p><span>Current stock</span><strong id="inv-current-stock">{{ selected_product.stock_quantity }} {{ selected_product.unit or 'pieces' }}</strong></p>
+                                    <p><span>Date and time</span><strong>{{ now.strftime('%Y-%m-%d %H:%M') }}</strong></p>
+                                    <p><span>Staff member</span><strong>{{ g.current_user.full_name }}</strong></p>
+                                </div>
+                                <p id="inv-stock-error" class="inv-stock-error" hidden></p>
+                                <div class="form-field">
+                                    <label for="inv-quantity">
+                                        {% if stock_action == 'adjust' %}
+                                            New stock quantity ({{ selected_product.unit or 'pieces' }})
+                                        {% elif stock_action == 'out' %}
+                                            Quantity to deduct ({{ selected_product.unit or 'pieces' }})
+                                        {% else %}
+                                            Quantity to add ({{ selected_product.unit or 'pieces' }})
+                                        {% endif %}
+                                    </label>
+                                    <input
+                                        id="inv-quantity"
+                                        name="quantity"
+                                        type="number"
+                                        inputmode="numeric"
+                                        min="{% if stock_action == 'adjust' %}0{% else %}1{% endif %}"
+                                        {% if stock_action == 'out' %}max="{{ selected_product.stock_quantity }}"{% endif %}
+                                        step="1"
+                                        value="{{ stock_form_data.quantity }}"
+                                        placeholder="{% if stock_action == 'adjust' %}Enter counted stock{% elif stock_action == 'out' %}Enter amount to remove{% else %}Enter amount received{% endif %}"
+                                        required
+                                    >
+                                </div>
+                                <div class="form-field">
+                                    <label for="inv-new-stock">Resulting stock quantity</label>
+                                    <input id="inv-new-stock" type="text" value="{{ selected_product.stock_quantity }}" readonly aria-live="polite">
+                                </div>
+                                <div class="form-field">
+                                    <label for="inv-note">
+                                        {% if stock_action == 'in' %}Reason / reference{% else %}Reason for {{ action_label|lower }}{% endif %}
+                                    </label>
+                                    <input
+                                        id="inv-note"
+                                        name="note"
+                                        type="text"
+                                        maxlength="255"
+                                        value="{{ stock_form_data.note }}"
+                                        required
+                                        placeholder="{% if stock_action == 'in' %}e.g. Supplier delivery #123{% elif stock_action == 'out' %}e.g. Damaged items, sold at counter{% else %}e.g. Physical count correction{% endif %}"
+                                    >
+                                </div>
+                            </form>
+                        {% else %}
+                            <section class="inv-product-history" aria-labelledby="inv-product-history-title">
+                                <div class="inv-panel-heading">
+                                    <h3 id="inv-product-history-title">Stock movement history</h3>
+                                    <a class="text-link" href="{{ url_for('inventory.stock_history', product_id=selected_product.id) }}">Full history</a>
+                                </div>
+                                {% if product_movements %}
+                                    <div class="table-wrap">
+                                        <table class="order-table">
+                                            <thead>
+                                                <tr>
+                                                    <th>When</th>
+                                                    <th>Type</th>
+                                                    <th>Qty</th>
+                                                    <th>Before</th>
+                                                    <th>After</th>
+                                                    <th>Reason</th>
+                                                    <th>Staff</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {% for row in product_movements %}
+                                                    <tr>
+                                                        <td>{{ row.created_at }}</td>
+                                                        <td>{{ row.movement_type }}</td>
+                                                        <td>{{ row.quantity }}</td>
+                                                        <td>{{ row.quantity_before }}</td>
+                                                        <td>{{ row.quantity_after }}</td>
+                                                        <td>{{ row.note or "—" }}</td>
+                                                        <td>{{ row.created_by_name or "—" }}</td>
+                                                    </tr>
+                                                {% endfor %}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                {% else %}
+                                    <p class="inv-history-empty">No stock movements recorded for this product yet.</p>
+                                {% endif %}
+                            </section>
+                        {% endif %}
+                    </div>
+
+                    {% if stock_action %}
+                        <div class="inv-modal-footer">
+                            <a class="button button-secondary" href="{{ base_product_url }}">Cancel</a>
+                            <button id="inv-stock-submit" class="button" type="submit" form="inv-stock-form">{{ submit_label }}</button>
+                        </div>
+                    {% endif %}
+                </div>
+            </section>
+        </div>
+        <script>
+            (function () {
+                var form = document.getElementById("inv-stock-form");
+                if (!form) return;
+                var quantityInput = document.getElementById("inv-quantity");
+                var newStockInput = document.getElementById("inv-new-stock");
+                var noteInput = document.getElementById("inv-note");
+                var errorEl = document.getElementById("inv-stock-error");
+                var submitBtn = document.getElementById("inv-stock-submit");
+                var current = Number(form.getAttribute("data-current-stock") || 0);
+                var action = form.getAttribute("data-stock-action");
+                var submitting = false;
+
+                function showError(message) {
+                    if (!errorEl) return;
+                    if (!message) {
+                        errorEl.hidden = true;
+                        errorEl.textContent = "";
+                        return;
+                    }
+                    errorEl.hidden = false;
+                    errorEl.textContent = message;
+                }
+
+                function updatePreview() {
+                    var qty = Number(quantityInput.value);
+                    if (!Number.isFinite(qty) || quantityInput.value === "") {
+                        newStockInput.value = "—";
+                        return null;
+                    }
+                    var next = current;
+                    if (action === "in") next = current + qty;
+                    else if (action === "out") next = current - qty;
+                    else next = qty;
+                    newStockInput.value = String(next);
+                    return { qty: qty, next: next };
+                }
+
+                function validate() {
+                    var preview = updatePreview();
+                    if (!preview || !Number.isInteger(preview.qty)) {
+                        return "Enter a whole-number quantity.";
+                    }
+                    if (action === "adjust") {
+                        if (preview.qty < 0) return "New stock quantity cannot be negative.";
+                    } else if (preview.qty < 1) {
+                        return "Quantity must be at least 1.";
+                    }
+                    if (action === "out" && preview.qty > current) {
+                        return "Cannot deduct more than the available stock (" + current + ").";
+                    }
+                    if (action === "out" && preview.next < 0) {
+                        return "Resulting stock cannot be negative.";
+                    }
+                    if (!noteInput.value.trim()) {
+                        return "Enter a reason before submitting.";
+                    }
+                    return "";
+                }
+
+                quantityInput.addEventListener("input", function () {
+                    showError("");
+                    updatePreview();
+                });
+                noteInput.addEventListener("input", function () {
+                    showError("");
+                });
+
+                form.addEventListener("submit", function (event) {
+                    if (submitting) {
+                        event.preventDefault();
+                        return;
+                    }
+                    var message = validate();
+                    if (message) {
+                        event.preventDefault();
+                        showError(message);
+                        return;
+                    }
+                    submitting = true;
+                    if (submitBtn) {
+                        submitBtn.disabled = true;
+                        submitBtn.textContent = "Saving…";
+                    }
+                });
+
+                updatePreview();
+            })();
+        </script>
+    {% endif %}
+{% endblock %}

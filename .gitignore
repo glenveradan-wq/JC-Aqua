@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.py[cod]
+.env
+.env.*
+!.env.example
+secrets/
+!*secrets/.gitkeep
+*firebase*adminsdk*.json
+static/uploads/products/*
+!static/uploads/products/.gitkeep

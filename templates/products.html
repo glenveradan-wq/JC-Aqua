@@ -1,0 +1,85 @@
+{% extends "workspace_base.html" %}
+
+{% block title %}Products and inventory{% endblock %}
+{% block main_class %}product-workspace{% endblock %}
+
+{% block content %}
+    <section class="page-heading">
+        <div>
+            <p class="eyebrow">Shop management</p>
+            <h1>Products and inventory</h1>
+            <p>Keep product prices and available stock up to date.</p>
+        </div>
+        <a class="button" href="{{ url_for('new_product') }}">＋ <span>Add product</span></a>
+    </section>
+
+    {% include "_flashes.html" %}
+
+    <nav class="status-filters" aria-label="Stock filters">
+        <a class="filter-chip{% if stock_filter == 'all' %} filter-chip-active{% endif %}" href="{{ url_for('product_list') }}">All</a>
+        <a class="filter-chip{% if stock_filter == 'low' %} filter-chip-active{% endif %}" href="{{ url_for('product_list', stock='low') }}">Low stock</a>
+        <a class="filter-chip{% if stock_filter == 'out' %} filter-chip-active{% endif %}" href="{{ url_for('product_list', stock='out') }}">Out of stock</a>
+    </nav>
+
+    <section class="workspace-card product-list-card" aria-label="Product inventory">
+        {% if products %}
+            <div class="table-wrap">
+                <table class="order-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">Product</th>
+                            <th scope="col">Category</th>
+                            <th scope="col">Unit price</th>
+                            <th scope="col">Stock</th>
+                            <th scope="col"><span class="visually-hidden">Actions</span></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for product in products %}
+                            <tr>
+                                <td>
+                                    <div class="product-table-name">
+                                        {% if product.image_path %}
+                                            <img class="product-thumb" src="{{ url_for('static', filename=product.image_path) }}" alt="" width="40" height="40">
+                                        {% endif %}
+                                        <strong class="table-primary">{{ product.name }}</strong>
+                                    </div>
+                                </td>
+                                <td>{{ product.category or "—" }}</td>
+                                <td>₱{{ "%.2f"|format(product.unit_price) }}</td>
+                                <td>
+                                    <span class="stock-pill {% if product.stock_quantity == 0 %}stock-empty{% elif product.stock_quantity <= 5 %}stock-low{% endif %}">
+                                        {{ product.stock_quantity }}
+                                        {% if product.stock_quantity == 0 %} · Out of stock{% elif product.stock_quantity <= 5 %} · Low stock{% endif %}
+                                    </span>
+                                </td>
+                                <td class="product-actions">
+                                    <a class="button button-secondary button-small table-action-button" href="{{ url_for('edit_product', product_id=product.id) }}">Edit</a>
+                                    <form method="post" action="{{ url_for('delete_product', product_id=product.id) }}" onsubmit="return confirm('Remove this product from inventory?');">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        <button class="button button-danger button-small table-action-button" type="submit">Delete</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <div class="empty-state table-empty">
+                <span class="empty-icon" aria-hidden="true">⌁</span>
+                {% if stock_filter == 'low' %}
+                    <h2>No low-stock products</h2>
+                    <p>Nothing is currently between 1 and {{ low_stock_threshold }} units.</p>
+                {% elif stock_filter == 'out' %}
+                    <h2>No out-of-stock products</h2>
+                    <p>All listed products currently have stock.</p>
+                {% else %}
+                    <h2>No products yet</h2>
+                    <p>Add your first fish or shop item to start tracking prices and stock.</p>
+                    <a class="button button-secondary" href="{{ url_for('new_product') }}">Add a product</a>
+                {% endif %}
+            </div>
+        {% endif %}
+    </section>
+{% endblock %}

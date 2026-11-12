@@ -1,0 +1,86 @@
+{% extends "workspace_base.html" %}
+
+{% block title %}{% if editing %}Edit product{% else %}Add product{% endif %}{% endblock %}
+{% block main_class %}form-workspace{% endblock %}
+
+{% block content %}
+    <a class="button button-secondary button-small back-link" href="{{ url_for('inventory.inventory_home') }}">← <span>Back to inventory</span></a>
+
+    <section class="page-heading form-page-heading">
+        <div>
+            <p class="eyebrow">Inventory</p>
+            <h1>{% if editing %}Edit product{% else %}Add a product{% endif %}</h1>
+            <p>Assign each product to Fish Food, Aquarium, or Aquarium Accessories.</p>
+        </div>
+    </section>
+
+    {% include "_flashes.html" %}
+
+    <form class="workspace-card product-form" method="post" enctype="multipart/form-data" action="{% if editing %}{{ url_for('edit_product', product_id=product_id) }}{% else %}{{ url_for('new_product') }}{% endif %}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="form-grid">
+            <div class="form-field form-field-wide">
+                <label for="product-name">Product name</label>
+                <input id="product-name" name="name" type="text" maxlength="160" value="{{ form_data.name }}" required>
+            </div>
+            <div class="form-field">
+                <label for="product-category">Category</label>
+                <select id="product-category" name="category" required>
+                    <option value="" {% if not form_data.category %}selected{% endif %}>Select category</option>
+                    {% for option in category_options or [] %}
+                        <option value="{{ option }}" {% if form_data.category == option %}selected{% endif %}>{{ option }}</option>
+                    {% endfor %}
+                </select>
+                {% if category_examples %}
+                    <p class="field-hint">
+                        {% for name, examples in category_examples.items() %}
+                            <strong>{{ name }}:</strong> {{ examples }}{% if not loop.last %}<br>{% endif %}
+                        {% endfor %}
+                    </p>
+                {% endif %}
+            </div>
+            <div class="form-field">
+                <label for="product-unit">Unit of measure</label>
+                <select id="product-unit" name="unit" required>
+                    {% for unit in product_units or [] %}
+                        <option value="{{ unit }}" {% if form_data.unit == unit %}selected{% endif %}>{{ unit|title }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-field">
+                <label for="product-sku">SKU <span class="field-optional">(optional)</span></label>
+                <input id="product-sku" name="sku" type="text" maxlength="40" value="{{ form_data.sku }}">
+            </div>
+            <div class="form-field">
+                <label for="product-price">Unit price (₱)</label>
+                <input id="product-price" name="unit_price" type="number" min="0" max="99999999.99" step="0.01" value="{{ form_data.unit_price }}" required>
+            </div>
+            <div class="form-field">
+                <label for="product-stock">Stock quantity</label>
+                <input id="product-stock" name="stock_quantity" type="number" min="0" max="4294967295" step="1" value="{{ form_data.stock_quantity }}" required>
+            </div>
+            <div class="form-field form-field-wide">
+                <label class="checkbox-field">
+                    <input type="checkbox" name="available_for_sale" value="1" {% if form_data.available_for_sale %}checked{% endif %}>
+                    Available for sale in customer catalog
+                </label>
+            </div>
+            <div class="form-field form-field-wide">
+                <label for="product-description">Description <span class="field-optional">(optional)</span></label>
+                <textarea id="product-description" name="description" rows="4" maxlength="2000">{{ form_data.description }}</textarea>
+            </div>
+            <div class="form-field form-field-wide">
+                <label for="product-image">Product image <span class="field-optional">(optional)</span></label>
+                {% if form_data.image_path %}
+                    <p class="field-hint">Current image is saved. Upload a new file to replace it.</p>
+                    <img class="product-image-preview" src="{{ url_for('static', filename=form_data.image_path) }}" alt="" width="120" height="120">
+                {% endif %}
+                <input id="product-image" name="image" type="file" accept=".jpg,.jpeg,.png,.webp,.gif,image/*">
+            </div>
+        </div>
+        <div class="form-actions">
+            <a class="button button-secondary" href="{{ url_for('inventory.inventory_home') }}">Cancel</a>
+            <button class="button" type="submit">{% if editing %}Save changes{% else %}Add product{% endif %}</button>
+        </div>
+    </form>
+{% endblock %}

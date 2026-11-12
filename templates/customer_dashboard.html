@@ -1,0 +1,90 @@
+{% extends "customer_base.html" %}
+{% block title %}Shop{% endblock %}
+{% block body_class %}customer-fish-page{% endblock %}
+{% block head %}
+    <link href="{{ url_for('static', filename='css/customer-fish.css', v=4) }}" rel="stylesheet">
+{% endblock %}
+
+{% block content %}
+    <section class="fish-hero">
+        <div>
+            <p class="eyebrow">Shop</p>
+            <h1>Welcome, {{ customer.full_name }}!</h1>
+            <p class="fish-hero-lead">Browse products</p>
+            <p>See what’s available in the shop, pick a quantity, and add items to your cart.</p>
+        </div>
+    </section>
+
+    <form class="fish-toolbar" method="get" action="{{ url_for('customer_dashboard') }}" role="search">
+        {% if active_category %}<input type="hidden" name="category" value="{{ active_category }}">{% endif %}
+        {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
+        <label class="visually-hidden" for="fish-search">Search fish by name</label>
+        <input
+            id="fish-search"
+            name="q"
+            type="search"
+            value="{{ search }}"
+            placeholder="Search by fish name"
+            autocomplete="off">
+        <button class="button" type="submit">Search</button>
+    </form>
+
+    <nav class="fish-chips" aria-label="Product categories">
+        <a class="fish-chip{% if not active_category %} is-active{% endif %}" href="{{ url_for('customer_dashboard', q=search, status=status) }}">All</a>
+        {% for category in categories %}
+            <a class="fish-chip{% if active_category == category %} is-active{% endif %}" href="{{ url_for('customer_dashboard', category=category, q=search, status=status) }}">{{ category }}</a>
+        {% endfor %}
+    </nav>
+
+    <nav class="fish-chips fish-chips-status" aria-label="Availability">
+        <a class="fish-chip{% if not status %} is-active{% endif %}" href="{{ url_for('customer_dashboard', category=active_category, q=search) }}">All</a>
+        <a class="fish-chip{% if status == 'available' %} is-active{% endif %}" href="{{ url_for('customer_dashboard', category=active_category, q=search, status='available') }}">Available</a>
+        <a class="fish-chip{% if status == 'low' %} is-active{% endif %}" href="{{ url_for('customer_dashboard', category=active_category, q=search, status='low') }}">Limited</a>
+        <a class="fish-chip{% if status == 'out' %} is-active{% endif %}" href="{{ url_for('customer_dashboard', category=active_category, q=search, status='out') }}">Sold out</a>
+    </nav>
+
+    {% if products %}
+        <section class="fish-grid" aria-label="Shop products">
+            {% for product in products %}
+                {% set status_key = customer_stock_status(product.stock_quantity) %}
+                <a
+                    class="fish-card"
+                    href="{{ url_for('customer_product_detail', product_id=product.id) }}"
+                    data-product-id="{{ product.id }}"
+                    aria-label="View {{ product.name }} details">
+                    <div class="fish-card-media">
+                        {% if product.image_path %}
+                            <img src="{{ url_for('static', filename=product.image_path) }}" alt="" loading="lazy">
+                        {% else %}
+                            <img src="{{ url_for('static', filename='images/product-placeholder.svg') }}" alt="" loading="lazy">
+                        {% endif %}
+                    </div>
+                    <div class="fish-card-body">
+                        <p class="fish-card-category">{{ product.category or "Uncategorized" }}</p>
+                        <h2>{{ product.name }}</h2>
+                        <p class="fish-card-price">₱{{ "%.2f"|format(product.unit_price) }}/{{ product.unit or 'pieces' }}</p>
+                        <p class="fish-card-stock">
+                            {% if status_key == 'out' %}
+                                Currently unavailable
+                            {% else %}
+                                Ready to order: <strong>{{ product.stock_quantity }} {{ product.unit or 'pieces' }}</strong>
+                            {% endif %}
+                        </p>
+                        <p class="fish-badge fish-badge-{{ status_key }}">
+                            {% if status_key == 'in' %}Available
+                            {% elif status_key == 'low' %}Limited
+                            {% else %}Sold out{% endif %}
+                        </p>
+                        <span class="fish-card-cta">View details</span>
+                    </div>
+                </a>
+            {% endfor %}
+        </section>
+    {% else %}
+        <div class="empty-state fish-empty">
+            <h2>No products match your filters</h2>
+            <p>Try another category, availability filter, or search term.</p>
+            <a class="button button-secondary" href="{{ url_for('customer_dashboard') }}">Reset filters</a>
+        </div>
+    {% endif %}
+{% endblock %}

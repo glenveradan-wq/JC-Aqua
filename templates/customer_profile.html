@@ -1,0 +1,88 @@
+{% extends "customer_base.html" %}
+{% block title %}Profile{% endblock %}
+{% block content %}
+    <section class="page-heading">
+        <div>
+            <p class="eyebrow">Account settings</p>
+            <h1>Your profile</h1>
+            <p>Update your account details and password.</p>
+        </div>
+    </section>
+
+    <section class="workspace-card profile-card" aria-labelledby="profile-form-title">
+        <div class="section-heading">
+            <div>
+                <h2 id="profile-form-title">Personal information</h2>
+                <p>Confirm your current password before saving any changes.</p>
+            </div>
+        </div>
+
+        <form class="profile-form" method="post" action="{{ url_for('customer_profile') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+            <div class="form-field profile-field">
+                <label for="full-name">Full name</label>
+                <input
+                    id="full-name"
+                    name="full_name"
+                    type="text"
+                    minlength="2"
+                    maxlength="120"
+                    autocomplete="name"
+                    value="{{ profile_data.full_name }}"
+                    required>
+            </div>
+
+            <div class="form-field profile-field">
+                <label for="email">Email address</label>
+                <input
+                    id="email"
+                    name="email"
+                    type="email"
+                    maxlength="254"
+                    autocomplete="email"
+                    value="{{ profile_data.email }}"
+                    required>
+            </div>
+
+            <div class="form-field profile-field">
+                <label for="current-password">Current password</label>
+                <input
+                    id="current-password"
+                    name="current_password"
+                    type="password"
+                    maxlength="128"
+                    autocomplete="current-password"
+                    required>
+            </div>
+
+            <p class="profile-password-note">
+                Leave the new password fields blank if you do not want to change it.
+            </p>
+
+            <div class="form-field profile-field">
+                <label for="new-password">New password</label>
+                <input
+                    id="new-password"
+                    name="new_password"
+                    type="password"
+                    minlength="10"
+                    maxlength="128"
+                    autocomplete="new-password">
+            </div>
+
+            <div class="form-field profile-field">
+                <label for="confirm-password">Confirm new password</label>
+                <input
+                    id="confirm-password"
+                    name="confirm_password"
+                    type="password"
+                    minlength="10"
+                    maxlength="128"
+                    autocomplete="new-password">
+            </div>
+
+            <button class="button" type="submit">Save changes</button>
+        </form>
+    </section>
+{% endblock %}

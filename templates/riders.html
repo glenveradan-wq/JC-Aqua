@@ -1,0 +1,54 @@
+{% extends "workspace_base.html" %}
+
+{% block title %}Delivery riders{% endblock %}
+{% block main_class %}form-workspace{% endblock %}
+
+{% block content %}
+    <section class="page-heading">
+        <div>
+            <p class="eyebrow">Delivery management</p>
+            <h1>Delivery riders</h1>
+            <p>Book and manage deliveries through Lalamove Philippines.</p>
+        </div>
+        <a
+            class="button"
+            href="https://www.lalamove.com/en-ph/"
+            target="_blank"
+            rel="noopener noreferrer">
+            Open Lalamove →
+        </a>
+    </section>
+
+    {% include "_flashes.html" %}
+
+    <section class="workspace-card">
+        <div class="section-heading">
+            <div>
+                <h2>Lalamove Philippines</h2>
+                <p>
+                    Use Lalamove to arrange rider pickup and delivery for customer orders.
+                    This opens the official Lalamove site in a new tab.
+                </p>
+            </div>
+        </div>
+        <p>
+            <a
+                class="text-link"
+                href="https://www.lalamove.com/en-ph/"
+                target="_blank"
+                rel="noopener noreferrer">
+                https://www.lalamove.com/en-ph/
+            </a>
+        </p>
+        <div class="page-heading-actions" style="justify-content:flex-start;margin-top:1rem;">
+            <a
+                class="button"
+                href="https://www.lalamove.com/en-ph/"
+                target="_blank"
+                rel="noopener noreferrer">
+                Go to Lalamove
+            </a>
+            <a class="button button-secondary" href="{{ url_for('order_list') }}">Back to customer orders</a>
+        </div>
+    </section>
+{% endblock %}

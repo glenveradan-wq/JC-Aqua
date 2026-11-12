@@ -1,0 +1,78 @@
+{% extends "customer_base.html" %}
+{% block title %}{{ product.name }}{% endblock %}
+{% block body_class %}customer-fish-page{% endblock %}
+{% block head %}
+    <link href="{{ url_for('static', filename='css/customer-fish.css', v=4) }}" rel="stylesheet">
+{% endblock %}
+
+{% block content %}
+    {% set status_key = customer_stock_status(product.stock_quantity) %}
+    <p class="customer-back-link"><a href="{{ url_for('customer_dashboard') }}">← Back to shop</a></p>
+
+    <section class="fish-detail" aria-labelledby="fish-detail-title">
+        <div class="fish-detail-media">
+            {% if product.image_path %}
+                <img src="{{ url_for('static', filename=product.image_path) }}" alt="{{ product.name }}">
+            {% else %}
+                <img src="{{ url_for('static', filename='images/product-placeholder.svg') }}" alt="">
+            {% endif %}
+        </div>
+        <div class="fish-detail-copy">
+            <p class="fish-card-category">{{ product.category or "Other" }}</p>
+            <h1 id="fish-detail-title">{{ product.name }}</h1>
+            <p class="fish-card-price">₱{{ "%.2f"|format(product.unit_price) }}/{{ product.unit or 'pieces' }}</p>
+            <p class="fish-card-stock">
+                {% if status_key == 'out' %}
+                    Currently unavailable
+                {% else %}
+                    Ready to order: <strong>{{ product.stock_quantity }} {{ product.unit or 'pieces' }}</strong>
+                {% endif %}
+            </p>
+            <p class="fish-badge fish-badge-{{ status_key }}">
+                {% if status_key == 'in' %}Available
+                {% elif status_key == 'low' %}Limited
+                {% else %}Sold out{% endif %}
+            </p>
+            <div class="fish-detail-description">
+                <h2>Description</h2>
+                {% if product.description %}
+                    <p>{{ product.description }}</p>
+                {% else %}
+                    <p>From JC Aqua Fish Shop. Price is shown per {{ product.unit or 'pieces' }}.</p>
+                {% endif %}
+            </div>
+
+            {% if product.stock_quantity > 0 %}
+                <form
+                    class="fish-order-form"
+                    method="post"
+                    action="{{ url_for('customer_cart_add', product_id=product.id) }}"
+                    data-unit-price="{{ product.unit_price }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="next" value="{{ url_for('customer_product_detail', product_id=product.id) }}">
+                    <label for="order-quantity">Quantity ({{ product.unit or 'pieces' }})</label>
+                    <div class="fish-qty-controls">
+                        <button type="button" class="button button-secondary" data-qty-step="-1" aria-label="Decrease quantity">−</button>
+                        <input
+                            id="order-quantity"
+                            name="quantity"
+                            type="number"
+                            min="1"
+                            max="{{ [product.stock_quantity, 100]|min }}"
+                            value="1"
+                            required>
+                        <button type="button" class="button button-secondary" data-qty-step="1" aria-label="Increase quantity">＋</button>
+                    </div>
+                    <p class="fish-order-total">Total: <strong data-line-total>₱{{ "%.2f"|format(product.unit_price) }}</strong></p>
+                    <div class="fish-order-actions">
+                        <button class="button" type="submit">Add to Order</button>
+                        <button class="button button-secondary" type="submit" name="checkout" value="1">Proceed to Checkout</button>
+                    </div>
+                </form>
+            {% else %}
+                <p class="fish-out-note">This fish is currently out of stock. Check back after the next restock.</p>
+            {% endif %}
+        </div>
+    </section>
+    <script src="{{ url_for('static', filename='js/fish-order.js', v=1) }}" defer></script>
+{% endblock %}

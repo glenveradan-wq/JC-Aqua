@@ -1,0 +1,27 @@
+{% extends "customer_base.html" %}
+{% block title %}Demo payment{% endblock %}
+{% block content %}
+    <section class="page-heading">
+        <div>
+            <p class="eyebrow">Payment simulator</p>
+            <h1>Demo payment for order #{{ order.id }}</h1>
+            <p>No real payment is taken or sent to a payment provider.</p>
+        </div>
+    </section>
+    <section class="workspace-card customer-card demo-payment-card">
+        <div class="demo-payment-note">
+            <strong>Simulation only</strong>
+            <p>Pressing the button records a demo status in this app. It does not charge a card, transfer money, or confirm a real payment.</p>
+        </div>
+        <p>Order total: <strong>₱{{ "%.2f"|format(order.total) }}</strong></p>
+        {% if order.payment_status == "demo-pending" and order.status != "cancelled" %}
+            <form method="post" action="{{ url_for('customer_demo_payment', order_id=order.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="button" type="submit">Simulate demo payment</button>
+            </form>
+        {% else %}
+            <p>This order is not eligible for a demo payment.</p>
+        {% endif %}
+        <p class="customer-back-link"><a href="{{ url_for('customer_order_detail', order_id=order.id) }}">← Return to order</a></p>
+    </section>
+{% endblock %}

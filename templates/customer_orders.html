@@ -1,0 +1,40 @@
+{% extends "customer_base.html" %}
+{% block title %}My orders{% endblock %}
+{% block content %}
+    <section class="page-heading">
+        <div>
+            <p class="eyebrow">My account</p>
+            <h1>My orders</h1>
+            <p>Track your order status, payment, and delivery updates here.</p>
+        </div>
+        <a class="button" href="{{ url_for('customer_dashboard') }}">Continue shopping</a>
+    </section>
+    {% if orders %}
+        <section class="workspace-card customer-card customer-orders-list">
+            {% for order in orders %}
+                <a class="customer-order-row customer-order-row-rich" href="{{ url_for('customer_order_detail', order_id=order.id) }}">
+                    <span>
+                        <strong>Order #{{ order.id }}</strong>
+                        <small>{{ order.created_at.strftime("%b %d, %Y") }}</small>
+                        <span class="customer-order-contact-preview">
+                            <small><strong>Address:</strong> {{ order.delivery_address or "—" }}</small>
+                            <small><strong>Name:</strong> {{ order.customer_name }}</small>
+                            <small><strong>Number:</strong> {{ order.customer_contact }}</small>
+                        </span>
+                    </span>
+                    <span>{{ order.item_count }} item{% if order.item_count != 1 %}s{% endif %}</span>
+                    <span class="status-pill status-{{ order.status }}">{{ order.status|replace('-', ' ')|title }}</span>
+                    <span>{% if order.delivery_option == 'delivery' %}Home Delivery{% else %}Store Pickup{% endif %}{% if order.delivery_option == 'delivery' %} • ₱{{ "%.2f"|format(order.delivery_fee) }}{% endif %}</span>
+                    <span>₱{{ "%.2f"|format(order.total) }}</span>
+                    <span class="customer-payment-status">{{ order.payment_status|replace('-', ' ')|title }}</span>
+                </a>
+            {% endfor %}
+        </section>
+    {% else %}
+        <section class="workspace-card"><div class="empty-state">
+            <h2>No orders yet</h2>
+            <p>When you place an order, its status will appear here.</p>
+            <a class="button" href="{{ url_for('public_catalog') }}">Browse products</a>
+        </div></section>
+    {% endif %}
+{% endblock %}

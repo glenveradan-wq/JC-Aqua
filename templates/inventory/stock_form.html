@@ -1,0 +1,98 @@
+{% extends "workspace_base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+    <section class="page-heading">
+        <div>
+            <p class="eyebrow">Inventory</p>
+            <h1>{{ title }}</h1>
+            <p>{{ description }} Stock adjustments are also available from each product on the Inventory page.</p>
+        </div>
+        <a class="button button-secondary" href="{{ url_for('inventory.inventory_home') }}">Back to inventory</a>
+    </section>
+    {% include "_flashes.html" %}
+    <form class="workspace-card product-form" method="post" id="standalone-stock-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="form-field">
+            <label for="product_id">Product</label>
+            <select id="product_id" name="product_id" required>
+                <option value="">Select a product</option>
+                {% for product in products %}
+                    <option
+                        value="{{ product.id }}"
+                        data-stock="{{ product.stock_quantity }}"
+                        {% if form_data.product_id|string == product.id|string %}selected{% endif %}
+                    >
+                        {{ product.name }} (on hand: {{ product.stock_quantity }})
+                    </option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-field">
+            <label for="current_stock">Current stock</label>
+            <input id="current_stock" type="text" value="—" readonly>
+        </div>
+        <div class="form-field">
+            <label for="quantity">
+                {% if movement_type == 'adjustment' %}New stock quantity{% else %}Adjustment quantity{% endif %}
+            </label>
+            <input id="quantity" name="quantity" type="number" min="{% if movement_type == 'adjustment' %}0{% else %}1{% endif %}" value="{{ form_data.quantity }}" required>
+        </div>
+        <div class="form-field">
+            <label for="new_stock">New stock quantity</label>
+            <input id="new_stock" type="text" value="—" readonly>
+        </div>
+        <div class="form-field">
+            <label for="note">Reason for adjustment</label>
+            <input id="note" name="note" type="text" maxlength="255" value="{{ form_data.note }}" required>
+        </div>
+        <div class="form-field">
+            <label>Date and time</label>
+            <input type="text" value="{{ now.strftime('%Y-%m-%d %H:%M') }}" readonly>
+        </div>
+        <div class="form-field">
+            <label>Staff member responsible</label>
+            <input type="text" value="{{ g.current_user.full_name }}" readonly>
+        </div>
+        <div class="form-actions">
+            <a class="button button-secondary" href="{{ url_for('inventory.stock_history') }}">Inventory history</a>
+            <button class="button" type="submit">Save movement</button>
+        </div>
+    </form>
+    <script>
+        (function () {
+            var select = document.getElementById("product_id");
+            var quantity = document.getElementById("quantity");
+            var currentStock = document.getElementById("current_stock");
+            var newStock = document.getElementById("new_stock");
+            var movementType = {{ movement_type|tojson }};
+
+            function selectedStock() {
+                var option = select.options[select.selectedIndex];
+                if (!option || !option.value) return null;
+                return Number(option.getAttribute("data-stock") || 0);
+            }
+
+            function refresh() {
+                var current = selectedStock();
+                if (current === null) {
+                    currentStock.value = "—";
+                    newStock.value = "—";
+                    return;
+                }
+                currentStock.value = String(current);
+                var qty = Number(quantity.value);
+                if (!Number.isFinite(qty)) {
+                    newStock.value = "—";
+                    return;
+                }
+                if (movementType === "in") newStock.value = String(current + qty);
+                else if (movementType === "out") newStock.value = String(current - qty);
+                else newStock.value = String(qty);
+            }
+
+            select.addEventListener("change", refresh);
+            quantity.addEventListener("input", refresh);
+            refresh();
+        })();
+    </script>
+{% endblock %}

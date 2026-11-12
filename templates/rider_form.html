@@ -1,0 +1,59 @@
+{% extends "workspace_base.html" %}
+
+{% block title %}{% if editing %}Edit rider{% else %}Add rider{% endif %}{% endblock %}
+{% block main_class %}form-workspace{% endblock %}
+
+{% block content %}
+    <div class="order-form-content">
+        <a class="button button-secondary button-small back-link" href="{{ url_for('rider_list') }}">← <span>Back to riders</span></a>
+
+        <section class="page-heading form-page-heading">
+            <div>
+                <p class="eyebrow">Delivery management</p>
+                <h1>{% if editing %}Edit rider{% else %}Add local rider{% endif %}</h1>
+                <p>Track the rider’s contact details and nearby service area.</p>
+            </div>
+        </section>
+
+        {% include "_flashes.html" %}
+
+        <form class="workspace-card order-form" method="post" action="{% if editing %}{{ url_for('edit_rider', rider_id=rider.id) }}{% else %}{{ url_for('new_rider') }}{% endif %}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <fieldset>
+                <legend>
+                    <span class="form-step">1</span>
+                    Rider details
+                </legend>
+                <div class="form-grid">
+                    <div class="form-field">
+                        <label for="full-name">Full name</label>
+                        <input id="full-name" name="full_name" type="text" minlength="2" maxlength="120" value="{{ rider.full_name if rider else '' }}" required>
+                    </div>
+                    <div class="form-field">
+                        <label for="phone-number">Contact number</label>
+                        <input id="phone-number" name="phone_number" type="tel" minlength="7" maxlength="40" value="{{ rider.phone_number if rider else '' }}" required>
+                    </div>
+                    <div class="form-field form-field-wide">
+                        <label for="service-area">Service area</label>
+                        <input id="service-area" name="service_area" type="text" minlength="2" maxlength="120" value="{{ rider.service_area if rider else '' }}" placeholder="Example: Laguna - Sta. Cruz and nearby barangays" required>
+                    </div>
+                    {% if editing %}
+                    <div class="form-field">
+                        <label for="rider-status">Status</label>
+                        <select id="rider-status" name="status">
+                            <option value="available" {% if rider.status == 'available' %}selected{% endif %}>Available</option>
+                            <option value="busy" {% if rider.status == 'busy' %}selected{% endif %}>Busy</option>
+                            <option value="offline" {% if rider.status == 'offline' %}selected{% endif %}>Offline</option>
+                        </select>
+                    </div>
+                    {% endif %}
+                </div>
+            </fieldset>
+
+            <div class="form-actions">
+                <a class="button button-secondary" href="{{ url_for('rider_list') }}">Cancel</a>
+                <button class="button" type="submit">{% if editing %}Save rider{% else %}Save rider{% endif %}</button>
+            </div>
+        </form>
+    </div>
+{% endblock %}

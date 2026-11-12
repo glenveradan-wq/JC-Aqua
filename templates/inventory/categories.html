@@ -1,0 +1,54 @@
+{% extends "workspace_base.html" %}
+{% block title %}Categories{% endblock %}
+{% block content %}
+    <section class="page-heading">
+        <div>
+            <p class="eyebrow">Inventory</p>
+            <h1>Categories</h1>
+            <p>Manage category labels used on the inventory card grid.</p>
+        </div>
+    </section>
+    {% include "_flashes.html" %}
+    <section class="workspace-card" style="margin-bottom:1rem;">
+        <form method="post" action="{{ url_for('inventory.category_list') }}" class="form-grid" style="grid-template-columns:1fr auto;align-items:end;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="form-field" style="margin:0;">
+                <label for="category-name">New category</label>
+                <input id="category-name" name="name" type="text" maxlength="80" required>
+            </div>
+            <button class="button" type="submit">Add</button>
+        </form>
+    </section>
+    <section class="workspace-card">
+        {% if categories %}
+            <div class="table-wrap">
+                <table class="order-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Sort</th>
+                            <th><span class="visually-hidden">Actions</span></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for category in categories %}
+                            <tr>
+                                <td>{{ category.name }}</td>
+                                <td>{{ category.sort_order }}</td>
+                                <td class="product-actions">
+                                    <a class="button button-secondary button-small" href="{{ url_for('inventory.category_edit', category_id=category.id) }}">Edit</a>
+                                    <form method="post" action="{{ url_for('inventory.category_delete', category_id=category.id) }}" onsubmit="return confirm('Delete this category?');">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        <button class="button button-danger button-small" type="submit">Delete</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <div class="empty-state"><h2>No categories yet</h2><p>Add your first category above.</p></div>
+        {% endif %}
+    </section>
+{% endblock %}

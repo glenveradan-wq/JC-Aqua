@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#0f4a52">
+    {% include "_favicon.html" %}
+    <title>{% block title %}Workspace{% endblock %} | JC Aqua Fish Shop</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css', v=9) }}" rel="stylesheet">
+    {% block head %}{% endblock %}
+</head>
+
+<body class="site-page {% block body_class %}{% endblock %}">
+    <header class="site-header">
+        <nav class="site-nav" aria-label="Staff navigation">
+            <div class="site-nav-brand">
+                <a class="page-back" href="{{ url_for('home') }}" data-history-back aria-label="Go back" title="Go back">←</a>
+                <a class="site-brand" href="{{ url_for('home') }}">
+                    <img
+                        src="{{ url_for('static', filename='images/jc-aqua-logo.jpg') }}"
+                        alt="JC Aqua Fish Shop"
+                        width="40"
+                        height="40">
+                    <span>JC Aqua Fish Shop</span>
+                    <span class="nav-role-tag">Staff</span>
+                </a>
+            </div>
+            <div class="nav-actions">
+                <a class="nav-link" href="{{ url_for('dashboard') }}" {% if active_page == "dashboard" %}aria-current="page"{% endif %}>Dashboard</a>
+                <a class="nav-link" href="{{ url_for('inventory.inventory_home') }}" {% if active_page == "inventory" %}aria-current="page"{% endif %}>Inventory</a>
+                <a class="nav-link" href="{{ url_for('inventory.stock_history') }}" {% if active_page == "stock-history" %}aria-current="page"{% endif %}>Stock history</a>
+                <a class="nav-link" href="{{ url_for('order_list') }}" {% if active_page == "orders" %}aria-current="page"{% endif %}>Customer orders</a>
+                <a
+                    class="nav-link"
+                    href="https://www.lalamove.com/en-ph/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title="Open Lalamove Philippines">Riders</a>
+                <a class="button button-small nav-cta" href="{{ url_for('new_order') }}">New order</a>
+                <a class="nav-link" href="{{ url_for('profile') }}">Profile</a>
+                <span class="nav-user">{{ g.current_user.full_name }}</span>
+                <form class="logout-form" method="post" action="{{ url_for('logout') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="nav-link logout-button" type="submit">Sign out</button>
+                </form>
+            </div>
+        </nav>
+    </header>
+
+    <main class="workspace-main {% block main_class %}{% endblock %}">
+        {% block content %}{% endblock %}
+    </main>
+    <script src="{{ url_for('static', filename='js/navigation.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='js/form_validation.js') }}" defer></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>
