@@ -84,6 +84,24 @@ Session cookies use `HttpOnly` and `SameSite=Lax`. For HTTPS deployments set
 `COOKIE_SECURE=1` so cookies are marked `Secure` and the app sends
 `Strict-Transport-Security`. Keep `COOKIE_SECURE=0` for local HTTP.
 
+## Deploy on Vercel (MySQL required)
+
+Vercel does **not** run your XAMPP MySQL. `.env` is gitignored, so you must
+paste env vars in **Vercel → Project Settings → Environment Variables**.
+
+1. Create a **cloud MySQL** database (Railway, Aiven, FreeSQLDatabase, etc.).
+2. Run `python init_db.py` locally against that cloud DB (set `MYSQL_*` first)
+   so tables exist.
+3. In Vercel, set at least:
+   - `FLASK_SECRET_KEY`
+   - `MYSQL_HOST` (cloud hostname, **not** `127.0.0.1`)
+   - `MYSQL_PORT` / `MYSQL_USER` / `MYSQL_PASSWORD` / `MYSQL_DATABASE`
+   - or one `DATABASE_URL=mysql://user:pass@host:3306/jc_aqua_fish_shop`
+   - `SMTP_*` for email OTP
+   - `STAFF_REGISTRATION_CODE`
+   - `COOKIE_SECURE=1`
+4. Redeploy, then open `/health/db` — `"ok": true` means MySQL is reachable.
+
 The staff workspace pages share a common navigation and layout template.
 
 The order total is calculated from item quantities and unit prices on the

@@ -8,6 +8,14 @@ from decimal import Decimal, InvalidOperation
 from functools import wraps
 from pathlib import Path
 
+# Load .env before reading FLASK_/MYSQL_/SMTP_ settings (local only; Vercel uses dashboard env).
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
+except ImportError:
+    pass
+
 import mysql.connector
 from flask import (
     Flask,
@@ -25,6 +33,7 @@ from flask_wtf.csrf import CSRFError, CSRFProtect
 from werkzeug.security import generate_password_hash
 from werkzeug.utils import secure_filename
 
+from database import database_ping, mysql_settings
 from firebase_auth import (
     firebase_enabled,
     firebase_web_config,
@@ -69,12 +78,18 @@ PAYMENT_UPLOAD_DIR = Path(app.root_path) / "static" / "uploads" / "payments"
 PRODUCT_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 LOW_STOCK_THRESHOLD = 5
 GCASH_NUMBER_PATTERN = re.compile(r"^[0-9+() .-]{7,40}$")
+# Vercel/Render are HTTPS — enable Secure cookies unless explicitly disabled.
+_cookie_secure = os.environ.get("COOKIE_SECURE")
+if _cookie_secure is None and (
+    os.environ.get("VERCEL") == "1" or os.environ.get("RENDER") == "true"
+):
+    _cookie_secure = "1"
 app.config.update(
     SECRET_KEY=os.environ.get("FLASK_SECRET_KEY"),
     # Local HTTP: leave COOKIE_SECURE unset/0. HTTPS production: set COOKIE_SECURE=1.
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
-    SESSION_COOKIE_SECURE=os.environ.get("COOKIE_SECURE") == "1",
+    SESSION_COOKIE_SECURE=_cookie_secure == "1",
     WTF_CSRF_TIME_LIMIT=3600,
     MAX_CONTENT_LENGTH=5 * 1024 * 1024,
 )
@@ -2255,14 +2270,41 @@ def delete_order(order_id: int):
     return redirect(url_for("order_list"))
 
 
+@app.get("/health/db")
+def health_db():
+    """Quick connectivity check for Vercel/Render diagnostics."""
+    settings = mysql_settings(include_database=True)
+    ok = database_ping()
+    return jsonify(
+        {
+            "ok": ok,
+            "host": settings.get("host"),
+            "port": settings.get("port"),
+            "database": settings.get("database"),
+            "user": settings.get("user"),
+            "ssl_disabled": settings.get("ssl_disabled"),
+        }
+    ), (200 if ok else 503)
+
+
 @app.errorhandler(mysql.connector.Error)
 def handle_database_error(error):
     app.logger.exception("Database operation failed: %s", error)
+    host = os.environ.get("MYSQL_HOST") or os.environ.get("DB_HOST") or "unset"
+    hint = (
+        "On Vercel, MYSQL_HOST cannot be 127.0.0.1. Use a cloud MySQL host and set "
+        "the same MYSQL_* / SMTP_* / FLASK_SECRET_KEY values in Project Settings → Environment Variables."
+        if host in {"127.0.0.1", "localhost", "unset", ""}
+        else "Check MYSQL_HOST, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DATABASE, and MYSQL_SSL on the host."
+    )
     return (
         render_template(
             "error.html",
             title="Database unavailable",
-            message="We could not complete that request. Check the MySQL connection and try again.",
+            message=(
+                "We could not reach MySQL. "
+                f"{hint}"
+            ),
         ),
         503,
     )
